@@ -17,12 +17,9 @@ const USAGE = `usage:
   clip render <id> [--trim a-b|a-] [--cuts "0-4,8-12"] [--aspect 16:9|9:16|1:1] [--fit pad|crop]
                    [--bg "#101020"] [--speed 1.5] [--text "t|x|y|size|#colour|weight"]...
                    [--captions-file f.json] [--no-normalize]
-  clip dub <id> --into es [--from en] [--wait]
-  clip dub-status <jobId>
   clip silence <id> [--start s --end s]
   clip comment <id> "text" [--author X]
   clip rm <id>
-  clip languages
   --json on any command prints the raw API JSON.`;
 
 class Usage extends Error {}
@@ -138,22 +135,6 @@ const COMMANDS = {
       await new Promise((r) => setTimeout(r, 1000));
     }
   },
-  async dub([id], f) {
-    const job = await api('POST', `/api/recordings/${enc(need(id, '<id>'))}/dub`,
-      { json: { targetLang: need(f.into, '--into <lang>'), ...(f.from && { sourceLang: f.from }) } });
-    if (!f.wait) return out(f.json ? job : job.jobId);
-    const deadline = Date.now() + 90 * 60_000;
-    let last;
-    for (;;) {
-      const s = await api('GET', `/api/dubs/${job.jobId}`);
-      if (s.step !== last) process.stderr.write(`${s.state}: ${(last = s.step)}\n`);
-      if (s.state === 'error') throw new Error(`dub failed at ${s.step}: ${s.error}`);
-      if (s.state === 'done') return out(f.json ? s : watchUrl(s.recordingId));
-      if (Date.now() > deadline) throw new Error(`dub ${job.jobId} still running after 90 minutes`);
-      await new Promise((r) => setTimeout(r, 3000));
-    }
-  },
-  async 'dub-status'([jobId]) { console.log(JSON.stringify(await api('GET', `/api/dubs/${enc(need(jobId, '<jobId>'))}`))); },
   async silence([id], f) {
     const q = new URLSearchParams(Object.entries({ start: f.start, end: f.end }).filter(([, v]) => v !== undefined));
     out(await api('GET', `/api/recordings/${enc(need(id, '<id>'))}/silence?${q}`));
@@ -163,17 +144,11 @@ const COMMANDS = {
     out(f.json ? c : `comment ${c.id} by ${c.author}`);
   },
   async rm([id], f) { const r = await api('DELETE', `/api/recordings/${enc(need(id, '<id>'))}`); out(f.json ? r : `deleted ${id}`); },
-  async languages(_, f) {
-    const r = await api('GET', '/api/dub/languages');
-    if (f.json) return out(r);
-    for (const l of r.languages) console.log(`${l.code}  ${l.name}${l.installed ? '' : '  (pack installs on first use)'}`);
-  },
 };
 
 const FLAGS = {
   upload: { title: 'str' },
   render: { trim: 'str', cuts: 'str', aspect: 'str', fit: 'str', bg: 'str', speed: 'str', text: 'list', 'captions-file': 'str', 'no-normalize': 'bool' },
-  dub: { into: 'str', from: 'str', wait: 'bool' },
   silence: { start: 'str', end: 'str' },
   comment: { author: 'str' },
 };

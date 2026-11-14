@@ -702,7 +702,7 @@ function toSrt(captions) {
 }
 
 // Render jobs: ffmpeg runs in the background, so a long edit neither holds an HTTP connection nor blocks a cancel.
-const renders = new Map(); // shortcut: in memory, like dubs
+const renders = new Map(); // shortcut: in memory, a restart forgets running jobs
 
 async function startRender(req, res, sourceId) {
   const source = getRecording(sourceId);
@@ -858,13 +858,9 @@ async function runRender(job, source, { start, end, cuts, kept, background, over
   }
 }
 
-// Dubbing through the local VoiceStudio (OmniVoice) API. Config is read per request so the key never sits in code.
-const DUB_TARGETS = ['es', 'hi', 'ur', 'ar', 'fr', 'de', 'pt', 'it'];
+// Optional auto-captions through a VoiceStudio (OmniVoice) server. Config is read per request so the key never sits in code.
 const LANGUAGES = { en: 'English', es: 'Spanish', hi: 'Hindi', ur: 'Urdu', ar: 'Arabic', fr: 'French', de: 'German', pt: 'Portuguese', it: 'Italian' };
-const MAX_DUB_MS = 60 * 60 * 1000;
-const ARGOS = '/engines/translation/argos/packs';
-// shortcut: in-memory, single-user; a restart forgets every job (VoiceStudio keeps running it, Clip loses the result). Persist in SQLite if that bites.
-const dubs = new Map();
+const MAX_TRANSCRIBE_MS = 60 * 60 * 1000;
 
 function voiceStudioKey() {
   return process.env.VOICE_STUDIO_KEY || fail(503, 'VoiceStudio is not configured');
@@ -905,14 +901,6 @@ async function* multipart(boundary, fields, file) {
   yield Buffer.from(`\r\n--${boundary}--\r\n`);
 }
 
-async function ensureArgosPack(from, to) {
-  const pair = { source_lang: from, target_langs: [to] };
-  const installed = async () => (await voiceStudio('POST', `${ARGOS}/status`, { json: pair })).pairs?.some((p) => p.target_lang === to && p.installed);
-  if (await installed()) return;
-  await voiceStudio('POST', `${ARGOS}/install`, { json: pair });
-  if (!await installed()) throw new Error(`VoiceStudio could not install the ${LANGUAGES[from] ?? from} → ${LANGUAGES[to]} translation pack`);
-}
-
 async function waitForTask(taskId, everyMs, minutes, doing) {
   const deadline = Date.now() + minutes * 60 * 1000;
   for (;;) {
@@ -924,120 +912,10 @@ async function waitForTask(taskId, everyMs, minutes, doing) {
   }
 }
 
-async function runDub(job, source, targetLang, sourceLang) {
-  const src = join(MEDIA, `${source.id}.webm`);
-  const id = randomUUID();
-  const file = join(MEDIA, `${id}.webm`);
-  const partial = `${file}.part`;
-  const mp3 = join(TMP, `${randomUUID()}.mp3`);
-  const step = (name) => Object.assign(job, { state: 'running', step: name });
-  try {
-    step('upload');
-    const boundary = `clip${randomUUID().replaceAll('-', '')}`;
-    const { job_id: vsJob, task_id: prepTask } = await voiceStudio('POST', '/dub/upload', {
-      body: multipart(boundary, { input_type: 'video', source_lang: sourceLang }, src),
-      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
-    });
-    if (!vsJob) throw new Error('VoiceStudio upload returned no job id');
-    // The 202 means "accepted": transcribe answers 404 until this prep task (audio extraction) is done.
-    if (prepTask) await waitForTask(prepTask, 1000, 15, 'preparing the upload');
-
-    step('transcribe');
-    const transcript = await voiceStudio('POST', `/dub/transcribe/${encodeURIComponent(vsJob)}`);
-    const segments = transcript.segments ?? [];
-    if (!segments.length) throw new Error('VoiceStudio heard no speech in this clip');
-    const from = transcript.source_lang || sourceLang;
-
-    let texts = segments.map((s) => s.text);
-    if (targetLang !== sourceLang) {
-      step('translate');
-      await ensureArgosPack(from, targetLang);
-      const { translated = [] } = await voiceStudio('POST', '/dub/translate', {
-        json: {
-          segments: segments.map(({ id: segId, start, end, text, speaker_id }) => ({ id: segId, start, end, text, speaker_id })),
-          target_lang: targetLang, source_lang: from, provider: 'argos', job_id: vsJob,
-        },
-      });
-      const byId = new Map(translated.map((t) => [t.id, t]));
-      // Errors come back per segment with HTTP 200, so each one is checked.
-      texts = segments.map(({ id: segId }) => {
-        const t = byId.get(segId);
-        if (t?.error) throw new Error(`Translation failed: ${t.error}`);
-        if (!t?.text?.trim()) throw new Error(`Translation returned no text for segment ${segId}`);
-        return t.text;
-      });
-    }
-
-    step('generate');
-    const { task_id: taskId } = await voiceStudio('POST', `/dub/generate/${encodeURIComponent(vsJob)}`, {
-      json: {
-        segments: segments.map(({ id: segId, start, end, speaker_id }, i) => ({ id: segId, start, end, text: texts[i], speaker_id })),
-        language: LANGUAGES[targetLang], language_code: targetLang,
-        timing_strategy: 'smart_fit', overflow_budget_s: 2, // the default "concise" fails whenever a translation runs longer
-      },
-    });
-    if (!taskId) throw new Error('VoiceStudio generate returned no task id');
-    await waitForTask(taskId, 3000, 45, 'generating speech');
-
-    step('mux');
-    const download = await voiceStudio('GET', `/dub/download-mp3/${encodeURIComponent(vsJob)}`, { timeout: 300_000, raw: true });
-    await pipeline(download.body, createWriteStream(mp3));
-    // apad + -shortest: the picture sets the length. A short dub is padded with silence (VoiceStudio's mp3 matches the
-    // source *audio*, which can end before the video); one that overruns is cut at the last frame.
-    const muxed = await run(FFMPEG, ['-y', '-i', src, '-i', mp3, '-map', '0:v:0', '-map', '1:a:0', '-af', 'apad', '-shortest',
-      '-c:v', 'copy', '-c:a', 'libopus', '-f', 'webm', partial]);
-    if (muxed === null) throw new Error('Mixing the dubbed audio into the video failed');
-    const probed = parseFloat(await run(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', partial]));
-    const sourceSeconds = source.duration_ms / 1000;
-    if (!(probed > 0) || (sourceSeconds > 0 && Math.abs(probed - sourceSeconds) > 2)) {
-      throw new Error(`Dubbed file is ${probed || 0}s long but the source is ${sourceSeconds}s; not saving a truncated dub`);
-    }
-    const { size } = await stat(partial);
-    await rename(partial, file);
-    const suffix = ` — ${targetLang.toUpperCase()} dub`;
-    sql.insert.run(id, source.title.slice(0, 120 - suffix.length) + suffix, Date.now(), Math.round(probed * 1000), size,
-      'video/webm', null, source.id, JSON.stringify({ dub: { lang: targetLang, vsJob } }));
-    Object.assign(job, { state: 'done', step: 'done', recordingId: id, url: `/watch/${id}` });
-  } catch (err) {
-    await rm(file, { force: true });
-    Object.assign(job, { state: 'error', error: err.message });
-    console.error(`Dub ${source.id} → ${targetLang} failed: ${err.message}`);
-  } finally {
-    await Promise.all([rm(partial, { force: true }), rm(mp3, { force: true })]);
-  }
-}
-
-async function startDub(req, res, sourceId) {
-  voiceStudioKey();
-  const source = getRecording(sourceId);
-  const { targetLang, sourceLang = 'en' } = await readJson(req);
-  if (!Object.hasOwn(LANGUAGES, targetLang)) fail(400, `Unknown target language; use one of ${Object.keys(LANGUAGES).join(', ')}`);
-  if (!Object.hasOwn(LANGUAGES, sourceLang)) fail(400, `Unknown source language; use one of ${Object.keys(LANGUAGES).join(', ')}`);
-  if (source.duration_ms > MAX_DUB_MS) fail(400, 'Dubbing is limited to clips of 60 minutes or less');
-  if (!existsSync(join(MEDIA, `${source.id}.webm`))) fail(404, 'Not found');
-  const jobId = randomUUID();
-  const job = { state: 'queued', step: 'upload' };
-  dubs.set(jobId, job);
-  runDub(job, source, targetLang, sourceLang); // never rejects: failures land on the job
-  json(res, 202, { jobId });
-}
-
-async function dubLanguages(res) {
-  voiceStudioKey();
-  let installed = new Set();
-  let warning;
-  try {
-    const { pairs = [] } = await voiceStudio('POST', `${ARGOS}/status`, { json: { source_lang: 'en', target_langs: DUB_TARGETS }, timeout: 10_000 });
-    installed = new Set(pairs.filter((p) => p.installed).map((p) => p.target_lang));
-  } catch (err) {
-    warning = `VoiceStudio is unreachable, so installed languages are unknown (${err.message})`;
-  }
-  json(res, 200, { languages: DUB_TARGETS.map((code) => ({ code, name: LANGUAGES[code], installed: installed.has(code) })), ...(warning && { warning }) });
-}
-
-// Auto-captions: the same VoiceStudio transcription the dub path uses, but the segments are kept
+// Auto-captions: VoiceStudio transcribes the clip, and the segments are kept
 // on the recording so the editor can turn them into captions without re-running Whisper.
-const transcribeJobs = new Map(); // shortcut: in memory, like dubs
+// shortcut: in-memory, single-user; a restart forgets every job. Persist in SQLite if that bites.
+const transcribeJobs = new Map();
 
 async function runTranscribe(job, source, sourceLang) {
   try {
@@ -1074,7 +952,7 @@ async function startTranscribe(req, res, sourceId) {
   if (!existsSync(join(MEDIA, `${source.id}.webm`))) fail(404, 'Not found');
   // A stored transcript answers immediately, so re-opening an edit and asking again is free.
   if (source.transcript && !force) return json(res, 200, { segments: JSON.parse(source.transcript), cached: true });
-  if (source.duration_ms > MAX_DUB_MS) fail(400, 'Auto-captions are limited to clips of 60 minutes or less');
+  if (source.duration_ms > MAX_TRANSCRIBE_MS) fail(400, 'Auto-captions are limited to clips of 60 minutes or less');
   const jobId = randomUUID();
   const job = { state: 'queued', step: 'upload' };
   transcribeJobs.set(jobId, job);
@@ -1293,12 +1171,6 @@ async function route(req, res) {
     }
     return json(res, 200, { ok: true });
   }
-
-  const dub = /^\/api\/recordings\/([a-z0-9-]+)\/dub$/.exec(pathname);
-  if (dub && method === 'POST') return startDub(req, res, dub[1]);
-  if (pathname === '/api/dub/languages' && method === 'GET') return dubLanguages(res);
-  const dubJob = /^\/api\/dubs\/([a-z0-9-]+)$/.exec(pathname);
-  if (dubJob && method === 'GET') return json(res, 200, dubs.get(dubJob[1]) ?? fail(404, 'Dub job not found (jobs are forgotten when the server restarts)'));
 
   const transcribe = /^\/api\/recordings\/([a-z0-9-]+)\/transcribe$/.exec(pathname);
   if (transcribe && method === 'POST') return startTranscribe(req, res, transcribe[1]);

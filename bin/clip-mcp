@@ -11,7 +11,6 @@ import { createInterface } from 'node:readline';
 
 const BASE = (process.env.CLIP_URL || 'http://localhost:3001').replace(/\/+$/, '');
 const TOKEN = process.env.CLIP_TOKEN;
-const DUB_WAIT_MS = 45 * 60_000;
 
 // node:http rather than fetch: fetch gives up on response headers after 300 s, and a render can take longer.
 function api(method, path, { json, file, headers = {} } = {}) {
@@ -134,25 +133,6 @@ const TOOLS = {
       return { cuts: r.cuts, removed_s: r.removed, total_s: r.total };
     },
   },
-  dub_recording: {
-    description: 'Re-voice a recording in another language as a new recording (es, hi, ur, ar, fr, de, pt, it). '
-      + 'Runs on a 4 GB GPU at roughly one minute of processing per minute of audio; wait:true polls for up to 45 minutes.',
-    inputSchema: obj({ id, target_lang: { type: 'string' }, source_lang: { type: 'string', description: 'Default en' }, wait: { type: 'boolean' } }, ['id', 'target_lang']),
-    run: async (a) => {
-      const { jobId } = await api('POST', `/api/recordings/${encodeURIComponent(a.id)}/dub`,
-        { json: { targetLang: a.target_lang, ...(a.source_lang && { sourceLang: a.source_lang }) } });
-      const deadline = Date.now() + DUB_WAIT_MS;
-      for (;;) {
-        const job = await api('GET', `/api/dubs/${jobId}`);
-        const done = job.state === 'done' || job.state === 'error';
-        if (!a.wait || done || Date.now() > deadline) {
-          if (job.state === 'error') throw new Error(`Dub failed at ${job.step}: ${job.error}`);
-          return { job_id: jobId, state: job.state, step: job.step, ...(job.recordingId && { id: job.recordingId, watch_url: watchUrl(job.recordingId) }) };
-        }
-        await sleep(3000);
-      }
-    },
-  },
   add_comment: {
     description: 'Add a comment to a recording.',
     inputSchema: obj({ id, body: { type: 'string' }, author: { type: 'string', description: 'Default Guest' } }, ['id', 'body']),
@@ -162,20 +142,6 @@ const TOOLS = {
     description: 'Permanently delete a recording and its media.',
     inputSchema: obj({ id }, ['id']),
     run: (a) => api('DELETE', `/api/recordings/${encodeURIComponent(a.id)}`),
-  },
-  save_to_drive: {
-    description: 'Save a recording to Google Drive, if this Clip server has Drive configured.',
-    inputSchema: obj({ id, name: { type: 'string' } }, ['id']),
-    run: async (a) => {
-      try {
-        const r = await api('POST', `/api/recordings/${encodeURIComponent(a.id)}/drive`, { json: { name: a.name } });
-        return { file_id: r.fileId ?? r.file_id, web_view_link: r.webViewLink ?? r.web_view_link };
-      } catch (err) {
-        // The server's catch-all 404 says exactly "Not found"; anything else is a real answer from a Drive route.
-        if (err.status === 404 && err.message === 'Not found') throw new Error('Drive is not configured on this server');
-        throw err;
-      }
-    },
   },
 };
 

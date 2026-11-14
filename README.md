@@ -29,8 +29,9 @@ There are no npm packages to install. Fonts for captions and text ship in `fonts
 under its own free licence in `fonts/LICENSE-DejaVu.txt`). Native Windows is untested: use
 Docker or WSL. Record in desktop Chrome, Edge or Firefox (see *Browser caveat* below).
 
-Optional: AI dubbing needs a VoiceStudio server (`VOICE_STUDIO_URL`, `VOICE_STUDIO_KEY`).
-Everything else works without it.
+Optional: the editor's **Auto-captions from audio** button needs a VoiceStudio (OmniVoice) speech
+server (`VOICE_STUDIO_URL`, `VOICE_STUDIO_KEY`). Without one, type captions by hand; everything
+else works.
 
 ## Drawing and zooming while you record
 
@@ -113,29 +114,6 @@ description text if you want to paste chapters by hand.
 - **Rendering holds the request open** and is slow for long clips; keep the tab open until it lands
   on the new watch page.
 
-## Dubbing
-
-The editor's **Dub** section re-voices a clip in another language (es, hi, ur, ar, fr, de, pt, it)
-or the same one, through a local [VoiceStudio](http://localhost:3000) (OmniVoice): upload →
-transcribe → translate (Argos, local; packs install on demand) → generate speech → mix into a new
-`<title> — ES dub` recording. The original is untouched.
-
-```sh
-VOICE_STUDIO_URL=http://localhost:3000   # default
-VOICE_STUDIO_KEY=<bearer token>          # required; without it /api/dub/* answers 503
-```
-
-Supply the key through the environment (e.g. a systemd `EnvironmentFile` outside the repo); never
-commit it.
-
-- **Cost:** on a 4 GB GTX 1650 Ti, generation takes roughly a minute of GPU time per minute of
-  audio (≈45 s for a 7 s clip, mostly fixed overhead). Clips are limited to 60 minutes.
-- **Jobs are in memory.** They survive a closed tab (the editor resumes polling on reload) but not a
-  Clip restart: a restart forgets every running and finished job, and a dub in flight is lost.
-- API: `POST /api/recordings/:id/dub {targetLang, sourceLang="en"}` → `202 {jobId}`;
-  `GET /api/dubs/:jobId` → `{state, step, error?, recordingId?, url?}`;
-  `GET /api/dub/languages` → the eight targets with `installed` per Argos pack.
-
 ## Agents
 
 `bin/clip` (CLI) and `bin/clip-mcp` (MCP server) are plain clients of the HTTP API above, with no
@@ -148,12 +126,10 @@ bin/clip upload take.webm --title "Demo"      # probes duration with ffprobe
 bin/clip render <id> --trim 0-30 --cuts "0-4,8-12" --aspect 9:16 \
   --text "Hello|0.5|0.85|64|#fff|bold"        # prints the new id and watch URL
 bin/clip silence <id>                         # proposed keep-ranges for --cuts
-bin/clip dub <id> --into es --wait            # step lines on stderr, watch URL on stdout
 bin/clip get <id> --json                      # --json on any command prints raw API JSON
 ```
 
-Errors go to stderr with exit 1; bad flags exit 2. `render` holds until ffmpeg finishes, and
-dubbing costs about a minute of GPU time per minute of audio.
+Errors go to stderr with exit 1; bad flags exit 2. `render` holds until ffmpeg finishes.
 
 **Claude Code:** `claude mcp add -s user clip -- /path/to/clip/bin/clip-mcp`; add
 `-e CLIP_URL=http://host:port` to point somewhere other than port 3001.
@@ -169,8 +145,7 @@ mcp_servers:
 ```
 
 Tools: `list_recordings`, `get_recording`, `upload_recording`, `render_recording`, `detect_silence`,
-`dub_recording`, `add_comment`, `delete_recording`, `save_to_drive` (the server has no Drive route
-yet, so it returns an error). `test/verify-agent.sh` checks both clients against a running server.
+`add_comment`, `delete_recording`. `test/verify-agent.sh` checks both clients against a running server.
 
 ## Browser caveat
 

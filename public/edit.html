@@ -261,17 +261,6 @@
         </div>
       </section>
 
-      <section class="edit-panel" aria-labelledby="dubHeading">
-        <h2 id="dubHeading">Dub</h2>
-        <div class="edit-row">
-          <label for="dubLang">Into</label>
-          <select id="dubLang"><option value="en">Same language (re-voice)</option></select>
-          <button id="dubStart" class="btn" type="button">Dub clip</button>
-        </div>
-        <p class="muted dub-note">Dubbing runs on this machine's VoiceStudio (4 GB GPU): about one minute of processing per minute of audio, and it keeps going if you close the tab.</p>
-        <p id="dubStatus" class="dub-status" role="status" aria-live="polite"></p>
-      </section>
-
       <div class="actions">
         <button id="render" class="btn primary" type="button" disabled>Render</button>
         <a id="cancel" class="btn">Cancel</a>
@@ -1225,86 +1214,6 @@
     }
     player.addEventListener('durationchange', setDuration);
     player.addEventListener('error', () => showError('This recording could not be loaded.'));
-
-    // Dub: the job runs server-side; localStorage only remembers which job to keep polling after a reload.
-    const DUB_KEY = `clip:dub:${id}`;
-    const DUB_STEPS = { upload: 'Uploading to VoiceStudio…', transcribe: 'Transcribing…', translate: 'Translating…', mux: 'Mixing…' };
-    let dubTimer;
-
-    function dubStatus(text, href) {
-      const status = $('dubStatus');
-      status.replaceChildren(text);
-      if (href) {
-        const link = document.createElement('a');
-        link.href = href;
-        link.textContent = 'watch it';
-        status.append(' ', link);
-      }
-    }
-
-    async function pollDub(jobId, langName) {
-      clearTimeout(dubTimer);
-      $('dubStart').disabled = true;
-      try {
-        const job = await request(`/api/dubs/${jobId}`);
-        if (job.state === 'done' || job.state === 'error') {
-          localStorage.removeItem(DUB_KEY);
-          $('dubStart').disabled = false;
-          return job.state === 'done' ? dubStatus('Dubbed:', job.url) : dubStatus(`Dub failed: ${job.error}`);
-        }
-        dubStatus(job.step === 'generate'
-          ? `Generating ${langName} speech… — about a minute per minute of audio on this GPU`
-          : DUB_STEPS[job.step] ?? 'Queued…');
-      } catch (err) {
-        if (/not found/i.test(err.message)) { // the server restarted and forgot the job
-          localStorage.removeItem(DUB_KEY);
-          $('dubStart').disabled = false;
-          return dubStatus(err.message);
-        }
-        dubStatus(`Checking dub status… (${err.message})`);
-      }
-      dubTimer = setTimeout(() => pollDub(jobId, langName), 2000);
-    }
-
-    async function startDub() {
-      const select = $('dubLang');
-      const targetLang = select.value;
-      const langName = select.selectedOptions[0].dataset.name ?? 'English';
-      $('dubStart').disabled = true;
-      dubStatus('Starting…');
-      try {
-        const { jobId } = await request(`${api}/dub`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ targetLang }),
-        });
-        localStorage.setItem(DUB_KEY, JSON.stringify({ jobId, recordingId: id, langName }));
-        pollDub(jobId, langName);
-      } catch (err) {
-        $('dubStart').disabled = false;
-        dubStatus(`Dub failed: ${err.message}`);
-      }
-    }
-
-    async function loadDub() {
-      $('dubStart').addEventListener('click', startDub);
-      try {
-        const { languages, warning } = await request('/api/dub/languages');
-        for (const { code, name } of languages.filter((l) => l.installed)) {
-          $('dubLang').append(new Option(name, code));
-          $('dubLang').lastElementChild.dataset.name = name;
-        }
-        if (warning) dubStatus(warning);
-      } catch (err) {
-        $('dubStart').disabled = true;
-        dubStatus(err.message);
-      }
-      try {
-        const saved = JSON.parse(localStorage.getItem(DUB_KEY));
-        if (saved?.jobId) pollDub(saved.jobId, saved.langName ?? 'translated');
-      } catch { localStorage.removeItem(DUB_KEY); }
-    }
-    loadDub();
 
     $('cancel').href = `/watch/${id}`;
     setBackground(background);

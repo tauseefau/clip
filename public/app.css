@@ -589,12 +589,6 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .icon-label { max-width: 150px; font-size: 11px; line-height: 1.25; color: #c7c7cc; }
 .icon-row .btn { padding: 6px 10px; font-size: 13px; }
 
-/* Editor: Dub section */
-.dub-note { font-size: 13px; }
-.dub-status { min-height: 1.4em; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
-.dub-status:empty { display: none; }
-.dub-status a { color: var(--accent); }
-
 .thumb-text { width: 230px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; font-size: 14px; }
 .countdown { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 22vh; font-weight: 700; text-shadow: 0 4px 24px #000; background: rgb(0 0 0 / 35%); pointer-events: none; }
 .countdown[hidden] { display: none; }

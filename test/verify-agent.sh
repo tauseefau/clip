@@ -62,9 +62,9 @@ lines = [json.loads(l) for l in open(sys.argv[1])]
 assert len(lines) == 3, len(lines)
 by = {m["id"]: m for m in lines}
 assert by[1]["result"]["serverInfo"]["name"] == "clip"
-assert len(by[2]["result"]["tools"]) == 9, [t["name"] for t in by[2]["result"]["tools"]]
+assert len(by[2]["result"]["tools"]) == 7, [t["name"] for t in by[2]["result"]["tools"]]
 assert isinstance(json.loads(by[3]["result"]["content"][0]["text"]), list)
-print("ok   3 lines, 9 tools, tool text is JSON")
+print("ok   3 lines, 7 tools, tool text is JSON")
 EOF
 
 echo '== 8 MCP bad tool and bad method'
