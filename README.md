@@ -1,7 +1,23 @@
 # Clip
 
-A self-hosted, single-user async video tool: record your screen and camera in the browser, get a
-link, share it, comment on it. See `DESIGN.md` for the product definition.
+A free, self-hosted screen recorder and video editor for creators. Record your screen and camera in
+the browser, draw and zoom while you talk, then trim, caption and export for YouTube or Shorts.
+Everything runs on your own computer: no account, no subscription, no cloud. See `DESIGN.md` for
+the product definition.
+
+![Recording with live arrows, highlights, numbered steps and text](docs/screenshots/recorder.png)
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Live zoom with the spotlight dimming everything else](docs/screenshots/zoom-spotlight.png) | ![Editor with silence removed and a styled caption](docs/screenshots/editor.png) |
+| **Zoom and spotlight live** while you record (Z, then O). | **Edit**: remove silence in one click, styled captions, zooms, music, Shorts format. |
+| ![Watch page with share link, thumbnails and upload package](docs/screenshots/watch.png) | ![Library of recordings](docs/screenshots/library.png) |
+| **Share and publish**: copy a link, thumbnails with a headline, YouTube upload package. | **Library** of every take, with comments. |
+
+<sub>The shared screen in these shots is a sample dashboard and the camera a cartoon stand-in; the
+Clip interface around them is real.</sub>
 
 ## Install
 
