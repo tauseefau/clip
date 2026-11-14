@@ -8,7 +8,7 @@ link, share it, comment on it. See `DESIGN.md` for the product definition.
 **Docker (any OS, including Windows):**
 
 ```sh
-git clone <this repo> clip && cd clip
+git clone https://github.com/tauseefau/clip.git && cd clip
 CLIP_TOKEN=$(openssl rand -hex 16) docker compose up -d
 docker compose logs | grep listening        # then open http://localhost:3001/?token=<your token>
 ```
@@ -19,7 +19,7 @@ The token is asked for once per browser. Recordings are kept in `./data`.
 ffmpeg (`sudo apt install ffmpeg` or `brew install ffmpeg`), then:
 
 ```sh
-git clone <this repo> clip && cd clip
+git clone https://github.com/tauseefau/clip.git && cd clip
 ./install.sh           # checks Node and ffmpeg, creates ./data
 npm start              # http://localhost:3000
 PORT=8080 npm start    # choose another port
