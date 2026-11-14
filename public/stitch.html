@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stitch · Clip</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="topbar">
+    <a class="brand" href="/">Clip</a>
+    <nav aria-label="Main">
+      <a href="/">Record</a>
+      <a href="/library">Library</a>
+      <a href="/stitch" aria-current="page">Stitch</a>
+    </nav>
+  </div>
+
+  <main class="library">
+    <header>
+      <h1>Stitch clips together</h1>
+      <p class="muted">Pick two or more recordings; they are joined in order into one clip.</p>
+    </header>
+    <p id="notice" class="notice" role="status" hidden></p>
+    <div id="list" class="card-grid"></div>
+    <div class="actions" style="margin-top:16px">
+      <button id="stitch" class="btn primary" type="button" disabled>Stitch selected</button>
+      <span id="status" class="muted" role="status"></span>
+    </div>
+  </main>
+
+  <script src="/auth.js"></script>
+  <script type="module">
+    const $ = (id) => document.getElementById(id);
+    const api = '/api/recordings';
+
+    function showError(message) {
+      const n = $('notice');
+      n.hidden = false;
+      n.textContent = message;
+      n.classList.add('error');
+    }
+
+    function formatTimecode(ms) {
+      const s = Math.round(ms / 1000);
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      return `${m}:${String(r).padStart(2, '0')}`;
+    }
+
+    async function load() {
+      try {
+        const recordings = await (await fetch(api)).json();
+        const list = $('list');
+        list.replaceChildren();
+        for (const r of recordings) {
+          const card = document.createElement('label');
+          card.className = 'card';
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.value = r.id;
+          checkbox.style.marginRight = '8px';
+          const title = document.createElement('strong');
+          title.textContent = r.title;
+          const meta = document.createElement('span');
+          meta.className = 'muted';
+          meta.textContent = `${formatTimecode(r.duration_ms)} · ${new Date(r.created_at).toLocaleDateString()}`;
+          card.append(checkbox, title, document.createElement('br'), meta);
+          list.append(card);
+        }
+        list.addEventListener('change', () => {
+          const n = list.querySelectorAll('input:checked').length;
+          $('stitch').disabled = n < 2;
+          $('status').textContent = n ? `${n} selected` : '';
+        });
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    $('stitch').addEventListener('click', async () => {
+      const ids = [...$('list').querySelectorAll('input:checked')].map((i) => i.value);
+      $('stitch').disabled = true;
+      $('status').textContent = 'Stitching… this may take a while.';
+      try {
+        const { url } = await (await fetch('/api/stitch', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ids }),
+        })).json();
+        if (!url) throw new Error('Stitch failed');
+        location.href = url;
+      } catch (err) {
+        showError(err.message);
+        $('stitch').disabled = false;
+        $('status').textContent = '';
+      }
+    });
+
+    load();
+  </script>
+</body>
+</html>

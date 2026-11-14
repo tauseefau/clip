@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Library · Clip</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="topbar">
+    <a class="brand" href="/">Clip</a>
+    <nav aria-label="Main">
+      <a href="/">Record</a>
+      <a href="/library" aria-current="page">Library</a>
+      <a href="/stitch">Stitch</a>
+    </nav>
+  </div>
+
+  <main>
+    <h1 class="page-title">Library</h1>
+    <div id="notice" class="notice error" role="alert" hidden></div>
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty" hidden>
+      <p>No recordings yet.</p>
+      <a class="btn primary" href="/">Record your first clip</a>
+    </div>
+  </main>
+
+  <script src="/auth.js"></script>
+  <script type="module">
+    const THUMB_WIDTH = 480;
+    const THUMB_TIMEOUT_MS = 8000;
+
+    const el = (tag, className, text) => {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    };
+    const mm = (value) => String(Math.floor(value)).padStart(2, '0');
+    const formatTime = (ms) => `${mm(ms / 60000)}:${mm((ms / 1000) % 60)}`;
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const relativeTime = (ms) => {
+      const minutes = Math.round((Date.now() - ms) / 60000);
+      if (minutes < 1) return 'just now';
+      if (minutes < 60) return `${minutes} min ago`;
+      const hours = Math.round(minutes / 60);
+      if (hours < 24) return `${hours} h ago`;
+      const days = Math.round(hours / 24);
+      if (days === 1) return 'Yesterday';
+      if (days < 7) return `${days} days ago`;
+      return new Date(ms).toLocaleDateString();
+    };
+
+    function card(recording) {
+      const link = el('a', 'card');
+      link.href = `/watch/${recording.id}`;
+
+      const thumb = el('div', 'thumb loading');
+      const canvas = el('canvas');
+      canvas.width = 16;
+      canvas.height = 9;
+      const image = el('img');
+      image.alt = '';
+      thumb.append(canvas, image, el('span', 'length', formatTime(recording.duration_ms)));
+
+      const body = el('div', 'card-body');
+      const date = el('time', 'card-date', relativeTime(recording.created_at));
+      date.dateTime = new Date(recording.created_at).toISOString();
+      date.title = new Date(recording.created_at).toLocaleString();
+      const meta = el('div', 'card-meta');
+      meta.append(date, document.createTextNode(' · '), plural(recording.comments, 'comment'));
+      body.append(el('div', 'card-title', recording.title), meta);
+      link.append(thumb, body);
+      return { link, thumb, canvas, image };
+    }
+
+    function loadImage(recording, image) {
+      return new Promise((resolve) => {
+        image.onload = () => resolve(true);
+        image.onerror = () => { image.remove(); resolve(false); };
+        image.src = `/media/${recording.id}.jpg`;
+      });
+    }
+
+    function drawThumbnail(recording, canvas) {
+      return new Promise((resolve) => {
+        const video = el('video');
+        video.muted = true;
+        video.preload = 'metadata';
+
+        const finish = () => {
+          clearTimeout(timer);
+          video.removeAttribute('src'); // releases the connection for the next thumbnail
+          video.load();
+          resolve();
+        };
+        const timer = setTimeout(finish, THUMB_TIMEOUT_MS);
+
+        video.onerror = finish;
+        video.onloadedmetadata = () => {
+          video.currentTime = Math.min(1, recording.duration_ms / 2000);
+        };
+        video.onseeked = () => {
+          canvas.width = THUMB_WIDTH;
+          canvas.height = Math.round(THUMB_WIDTH * video.videoHeight / video.videoWidth) || 270;
+          canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+          finish();
+        };
+        video.src = `/media/${recording.id}.webm`;
+      });
+    }
+
+    async function load() {
+      try {
+        const response = await fetch('/api/recordings');
+        if (!response.ok) throw new Error(`Server returned ${response.status}`);
+        const recordings = await response.json();
+        document.getElementById('empty').hidden = recordings.length > 0;
+
+        const cards = recordings.map((recording) => ({ recording, ...card(recording) }));
+        document.getElementById('grid').append(...cards.map((c) => c.link));
+        // One at a time: browsers cap connections per host, and a first load runs an ffmpeg per card.
+        for (const { recording, thumb, canvas, image } of cards) {
+          if (!await loadImage(recording, image)) await drawThumbnail(recording, canvas);
+          thumb.classList.remove('loading');
+        }
+      } catch (err) {
+        const notice = document.getElementById('notice');
+        notice.textContent = `Could not load your recordings: ${err.message}`;
+        notice.hidden = false;
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>

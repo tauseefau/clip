@@ -1,0 +1,13 @@
+services:
+  clip:
+    build: .
+    image: clip:latest
+    container_name: clip
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      # HOST=0.0.0.0 requires a token; open http://localhost:3001/?token=<it> once per browser.
+      CLIP_TOKEN: "${CLIP_TOKEN:?Set CLIP_TOKEN, e.g. CLIP_TOKEN=$(openssl rand -hex 16) docker compose up -d}"
+    volumes:
+      - ./data:/app/data

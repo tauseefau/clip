@@ -1,0 +1,14 @@
+{
+  "name": "clip",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "description": "Self-hosted screen recorder and video editor for YouTube creators: record, draw, zoom, edit, caption and share.",
+  "engines": {
+    "node": ">=24"
+  },
+  "license": "MIT"
+}

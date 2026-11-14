@@ -1,0 +1,191 @@
+#!/usr/bin/env node
+// clip: command-line client for Clip's HTTP API. CLIP_URL (default http://localhost:3001), CLIP_TOKEN (optional).
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { createReadStream } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { basename, extname } from 'node:path';
+
+const BASE = (process.env.CLIP_URL || 'http://localhost:3001').replace(/\/+$/, '');
+const TOKEN = process.env.CLIP_TOKEN;
+const USAGE = `usage:
+  clip ls [--json]                      list recordings
+  clip get <id>                         one recording as JSON (no waveform)
+  clip url <id>                         print the watch URL
+  clip upload <file> [--title T]        upload a video file
+  clip render <id> [--trim a-b|a-] [--cuts "0-4,8-12"] [--aspect 16:9|9:16|1:1] [--fit pad|crop]
+                   [--bg "#101020"] [--speed 1.5] [--text "t|x|y|size|#colour|weight"]...
+                   [--captions-file f.json] [--no-normalize]
+  clip dub <id> --into es [--from en] [--wait]
+  clip dub-status <jobId>
+  clip silence <id> [--start s --end s]
+  clip comment <id> "text" [--author X]
+  clip rm <id>
+  clip languages
+  --json on any command prints the raw API JSON.`;
+
+class Usage extends Error {}
+const usage = (msg) => { throw new Usage(msg); };
+
+// node:http rather than fetch: fetch gives up on response headers after 300 s, and a render can take longer.
+function api(method, path, { json, file, headers = {} } = {}) {
+  const url = new URL(BASE + path);
+  const send = url.protocol === 'https:' ? httpsRequest : httpRequest;
+  if (TOKEN) headers['x-clip-token'] = TOKEN;
+  if (json !== undefined) headers['content-type'] = 'application/json';
+  return new Promise((resolve, reject) => {
+    const req = send(url, { method, headers }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('error', reject);
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        let body = text;
+        try { body = JSON.parse(text); } catch { /* text bodies */ }
+        if (res.statusCode >= 200 && res.statusCode < 300) return resolve(body);
+        reject(new Error(body?.error || `HTTP ${res.statusCode}`));
+      });
+    });
+    req.on('error', (err) => reject(new Error(`cannot reach Clip at ${BASE}: ${err.code || err.message}`)));
+    if (file) createReadStream(file).on('error', reject).pipe(req);
+    else req.end(json === undefined ? undefined : JSON.stringify(json));
+  });
+}
+
+// Splits argv into positionals and flags; every flag must be declared, so typos are usage errors.
+function parse(argv, spec) {
+  const pos = [], flags = { text: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (!arg.startsWith('--')) { pos.push(arg); continue; }
+    const name = arg.slice(2);
+    if (!(name in spec)) usage(`unknown flag ${arg}`);
+    if (spec[name] === 'bool') { flags[name] = true; continue; }
+    if (i + 1 >= argv.length) usage(`${arg} needs a value`);
+    if (spec[name] === 'list') flags[name].push(argv[++i]); else flags[name] = argv[++i];
+  }
+  return { pos, flags };
+}
+
+const num = (s, what) => { const n = Number(s); if (s === '' || !Number.isFinite(n)) usage(`${what}: "${s}" is not a number`); return n; };
+const range = (s, what) => { const m = /^([^-]+)-(.*)$/.exec(s) ?? usage(`${what}: expected a-b, got "${s}"`); return [num(m[1], what), m[2] === '' ? null : num(m[2], what)]; };
+const hex = (c) => /^#[0-9a-f]{3}$/i.test(c) ? '#' + [...c.slice(1)].map((d) => d + d).join('') : c;
+
+function overlay(spec) {
+  const [text, x = '0.5', y = '0.5', size = '64', color = '#ffffff', weight = 'normal'] = spec.split('|');
+  if (!text) usage('--text needs text before the first |');
+  const font = weight === 'serif' ? 'serif' : weight === 'bold' ? 'sans-bold' : 'sans';
+  return { text, x: num(x, '--text x'), y: num(y, '--text y'), size: num(size, '--text size'), color: hex(color), font, bold: weight === 'bold' };
+}
+
+const watchUrl = (id) => `${BASE}/watch/${id}`;
+const enc = encodeURIComponent;
+const need = (v, what) => v ?? usage(`missing ${what}`);
+const out = (v) => console.log(typeof v === 'string' ? v : JSON.stringify(v, null, 2));
+const secs = (ms) => `${((ms || 0) / 1000).toFixed(1)}s`;
+const probeMs = (path) => new Promise((resolve) => execFile('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', path],
+  (err, o) => resolve(err ? 0 : Math.round(parseFloat(o) * 1000) || 0)));
+
+async function getRecording(id) {
+  const { waveform, edit, ...rest } = await api('GET', `/api/recordings/${enc(id)}`);
+  return { ...rest, ...(edit && { edit: JSON.parse(edit) }), watch_url: watchUrl(rest.id) };
+}
+
+const COMMANDS = {
+  async ls(_, f) {
+    const rows = await api('GET', '/api/recordings');
+    if (f.json) return out(rows);
+    for (const r of rows) {
+      console.log([r.id, secs(r.duration_ms).padStart(7), new Date(r.created_at).toISOString().slice(0, 16).replace('T', ' '),
+        `${r.comments ?? 0}c`.padStart(4), r.title].join('  '));
+    }
+  },
+  async get([id]) { out(await getRecording(need(id, '<id>'))); },
+  async url([id], f) { const r = await getRecording(need(id, '<id>')); out(f.json ? { url: r.watch_url } : r.watch_url); },
+  async upload([file], f) {
+    await stat(need(file, '<file>'));
+    const title = f.title ?? basename(file, extname(file));
+    const r = await api('POST', '/api/recordings', {
+      file,
+      headers: { 'x-title': Buffer.from(title, 'utf8').toString('latin1'), 'x-duration-ms': String(await probeMs(file)) },
+    });
+    out(f.json ? r : `${r.id}  ${watchUrl(r.id)}`);
+  },
+  async render([id], f) {
+    need(id, '<id>');
+    const body = {};
+    let [start, end] = f.trim ? range(f.trim, '--trim') : [0, null];
+    if (end === null) {
+      const { duration_ms } = await api('GET', `/api/recordings/${enc(id)}`);
+      if (!duration_ms) usage('recording has no stored duration; pass --trim a-b');
+      end = duration_ms / 1000;
+    }
+    body.trim = { start, end };
+    if (f.cuts) body.cuts = f.cuts.split(',').map((c) => { const [a, b] = range(c.trim(), '--cuts'); return [a, b ?? usage('--cuts ranges need an end')]; });
+    if (f.aspect) body.aspect = f.aspect;
+    if (f.fit) body.fit = f.fit;
+    if (f.bg) body.background = hex(f.bg);
+    if (f.speed) body.speed = num(f.speed, '--speed');
+    if (f['no-normalize']) body.normalize = false;
+    if (f.text.length) body.overlays = f.text.map(overlay);
+    if (f['captions-file']) body.captions = JSON.parse(await readFile(f['captions-file'], 'utf8'));
+    const { jobId } = await api('POST', `/api/recordings/${enc(id)}/render`, { json: body });
+    for (;;) { // the render is a background job since e91d7b5
+      const s = await api('GET', `/api/renders/${jobId}`);
+      if (s.state === 'error' || s.state === 'canceled') throw new Error(`render failed at ${s.step}: ${s.error}`);
+      if (s.state === 'done') return out(f.json ? s : `${s.id}  ${watchUrl(s.id)}`);
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  },
+  async dub([id], f) {
+    const job = await api('POST', `/api/recordings/${enc(need(id, '<id>'))}/dub`,
+      { json: { targetLang: need(f.into, '--into <lang>'), ...(f.from && { sourceLang: f.from }) } });
+    if (!f.wait) return out(f.json ? job : job.jobId);
+    const deadline = Date.now() + 90 * 60_000;
+    let last;
+    for (;;) {
+      const s = await api('GET', `/api/dubs/${job.jobId}`);
+      if (s.step !== last) process.stderr.write(`${s.state}: ${(last = s.step)}\n`);
+      if (s.state === 'error') throw new Error(`dub failed at ${s.step}: ${s.error}`);
+      if (s.state === 'done') return out(f.json ? s : watchUrl(s.recordingId));
+      if (Date.now() > deadline) throw new Error(`dub ${job.jobId} still running after 90 minutes`);
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  },
+  async 'dub-status'([jobId]) { console.log(JSON.stringify(await api('GET', `/api/dubs/${enc(need(jobId, '<jobId>'))}`))); },
+  async silence([id], f) {
+    const q = new URLSearchParams(Object.entries({ start: f.start, end: f.end }).filter(([, v]) => v !== undefined));
+    out(await api('GET', `/api/recordings/${enc(need(id, '<id>'))}/silence?${q}`));
+  },
+  async comment([id, text], f) {
+    const c = await api('POST', `/api/recordings/${enc(need(id, '<id>'))}/comments`, { json: { body: need(text, '"text"'), author: f.author } });
+    out(f.json ? c : `comment ${c.id} by ${c.author}`);
+  },
+  async rm([id], f) { const r = await api('DELETE', `/api/recordings/${enc(need(id, '<id>'))}`); out(f.json ? r : `deleted ${id}`); },
+  async languages(_, f) {
+    const r = await api('GET', '/api/dub/languages');
+    if (f.json) return out(r);
+    for (const l of r.languages) console.log(`${l.code}  ${l.name}${l.installed ? '' : '  (pack installs on first use)'}`);
+  },
+};
+
+const FLAGS = {
+  upload: { title: 'str' },
+  render: { trim: 'str', cuts: 'str', aspect: 'str', fit: 'str', bg: 'str', speed: 'str', text: 'list', 'captions-file': 'str', 'no-normalize': 'bool' },
+  dub: { into: 'str', from: 'str', wait: 'bool' },
+  silence: { start: 'str', end: 'str' },
+  comment: { author: 'str' },
+};
+
+const [cmd, ...rest] = process.argv.slice(2);
+try {
+  if (!cmd || cmd === '-h' || cmd === '--help' || cmd === 'help') { console.log(USAGE); process.exit(cmd ? 0 : 2); }
+  if (!Object.hasOwn(COMMANDS, cmd)) usage(`unknown command ${cmd}`);
+  const { pos, flags } = parse(rest, { json: 'bool', ...FLAGS[cmd] });
+  await COMMANDS[cmd](pos, flags);
+} catch (err) {
+  console.error(`clip: ${err.message}`);
+  if (err instanceof Usage) console.error(USAGE);
+  process.exit(err instanceof Usage ? 2 : 1);
+}

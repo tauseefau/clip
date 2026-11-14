@@ -1,0 +1,1443 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Edit · Clip</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="topbar">
+    <a class="brand" href="/">Clip</a>
+    <nav aria-label="Main">
+      <a href="/">Record</a>
+      <a href="/library">Library</a>
+      <a href="/stitch">Stitch</a>
+    </nav>
+  </div>
+
+  <main class="watch">
+    <div id="notice" class="notice error" role="alert" hidden></div>
+    <p id="draftNote" class="muted" role="status" hidden>Draft restored</p>
+
+    <article id="content" hidden>
+      <div id="stage" class="edit-stage">
+        <video id="player" controls playsinline preload="metadata"></video>
+        <div id="layer" class="overlay-layer">
+          <img id="wmPreview" class="wm-preview" alt="" hidden>
+          <div id="capPreview" class="caption-preview" hidden></div>
+        </div>
+      </div>
+      <!-- aria-hidden: a mouse shortcut for the player's own scrubber; the cut list below carries the same information -->
+      <div id="timelineViewport" class="timeline-viewport">
+        <div id="timeline" class="timeline" aria-hidden="true">
+          <div id="cutShade" class="cut-shade"></div>
+          <div id="playhead" class="playhead"></div>
+        </div>
+      </div>
+
+      <section class="edit-panel" aria-labelledby="trimHeading">
+        <h2 id="trimHeading">Trim</h2>
+        <div class="edit-row">
+          <label for="start">Start</label>
+          <input id="start" type="range" min="0" max="0" step="0.1" value="0">
+          <input id="startTime" class="timecode" inputmode="decimal" autocomplete="off" aria-label="Start time, mm:ss.s">
+        </div>
+        <div class="edit-row">
+          <label for="end">End</label>
+          <input id="end" type="range" min="0" max="0" step="0.1" value="0">
+          <input id="endTime" class="timecode" inputmode="decimal" autocomplete="off" aria-label="End time, mm:ss.s">
+        </div>
+        <output id="readout" class="muted" for="start end"></output>
+        <p id="limit" class="notice error" role="alert" hidden></p>
+      </section>
+
+      <section class="edit-panel" aria-labelledby="cutsHeading">
+        <h2 id="cutsHeading">Cuts</h2>
+        <p class="muted">Kept ranges, in recording time. Split at the playhead, then remove the piece you don't want.
+          Keys: Space play/pause, ←/→ frame, I/O set in/out, Ctrl+Z undo, Shift+Ctrl+Z redo.</p>
+        <div class="button-row">
+          <button id="split" class="btn" type="button">Split at playhead</button>
+          <button id="removeRange" class="btn" type="button">Remove selected range</button>
+          <button id="removeSilence" class="btn" type="button">Remove silence</button>
+        </div>
+        <div class="button-row">
+          <button id="prevFrame" class="btn" type="button" aria-label="Back one frame">◀ Frame</button>
+          <button id="nextFrame" class="btn" type="button" aria-label="Forward one frame">Frame ▶</button>
+          <button id="zoomOut" class="btn" type="button" aria-label="Zoom timeline out">−</button>
+          <output id="zoomReadout" class="muted" aria-live="polite">1×</output>
+          <button id="zoomIn" class="btn" type="button" aria-label="Zoom timeline in">+</button>
+        </div>
+        <output id="keptReadout" class="muted"></output>
+        <ol id="cutRows" class="cut-rows"></ol>
+      </section>
+
+      <section class="edit-panel" aria-labelledby="backgroundHeading">
+        <h2 id="backgroundHeading">Background</h2>
+        <div id="swatches" class="swatches">
+          <button class="swatch" type="button" data-color="#0b0b0c" aria-label="Near black"></button>
+          <button class="swatch" type="button" data-color="#ffffff" aria-label="White"></button>
+          <button class="swatch" type="button" data-color="#1b1b3a" aria-label="Navy"></button>
+          <button class="swatch" type="button" data-color="#2f6bff" aria-label="Blue"></button>
+          <button class="swatch" type="button" data-color="#ff5c5c" aria-label="Coral"></button>
+          <button class="swatch" type="button" data-color="#34c759" aria-label="Green"></button>
+          <label class="sr-only" for="customColor">Custom background colour</label>
+          <input id="customColor" type="color" value="#0b0b0c">
+        </div>
+      </section>
+
+      <section class="edit-panel" aria-labelledby="textHeading">
+        <h2 id="textHeading">Text</h2>
+        <button id="addText" class="btn" type="button">Add text</button>
+        <div id="textControls" class="text-controls" hidden>
+          <div class="edit-row">
+            <label for="overlayText">Text</label>
+            <input id="overlayText" maxlength="200" autocomplete="off">
+          </div>
+          <div class="edit-row">
+            <label for="overlaySize">Size</label>
+            <input id="overlaySize" type="range" min="16" max="96" step="1">
+            <output id="sizeReadout" class="muted" for="overlaySize"></output>
+          </div>
+          <div class="edit-row">
+            <label for="overlayFont">Font</label>
+            <select id="overlayFont">
+              <option value="sans">Sans</option>
+              <option value="sans-bold">Sans Bold</option>
+              <option value="serif">Serif</option>
+            </select>
+          </div>
+          <div class="edit-row">
+            <label for="overlayColor">Colour</label>
+            <input id="overlayColor" type="color">
+            <label class="check"><input id="overlayBold" type="checkbox"> Bold</label>
+            <button id="removeText" class="btn danger" type="button" aria-label="Remove text">✕</button>
+          </div>
+          <div class="edit-row">
+            <label for="overlayStart">Show</label>
+            <input id="overlayStart" class="timecode" type="number" min="0" step="0.1" placeholder="from" aria-label="Text appears at, in seconds">
+            <input id="overlayEnd" class="timecode" type="number" min="0" step="0.1" placeholder="to" aria-label="Text disappears at, in seconds">
+            <span class="muted">seconds into the edited clip; blank keeps it up throughout</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="edit-panel" aria-labelledby="zoomHeading">
+        <h2 id="zoomHeading">Zoom</h2>
+        <p class="muted">Punch in on part of the picture for a stretch of the clip. Times are seconds into the edited clip. With Crop to fill, a zoom also chooses which part of the picture a Short keeps.</p>
+        <div id="zoomRows" class="caption-rows"></div>
+        <button id="addZoom" class="btn" type="button">Add zoom at playhead</button>
+        <template id="zoomRow">
+          <div class="caption-row zoom-row">
+            <input class="zoom-start" type="number" min="0" step="0.1" aria-label="Zoom start in seconds">
+            <input class="zoom-end" type="number" min="0" step="0.1" aria-label="Zoom end in seconds">
+            <select class="zoom-level" aria-label="Zoom level">
+              <option value="1.5">1.5×</option>
+              <option value="2">2×</option>
+              <option value="2.5">2.5×</option>
+              <option value="3">3×</option>
+            </select>
+            <button class="btn zoom-pick" type="button"></button>
+            <button class="btn danger zoom-remove" type="button" aria-label="Remove zoom">✕</button>
+          </div>
+        </template>
+      </section>
+
+      <section class="edit-panel" aria-labelledby="formatHeading">
+        <h2 id="formatHeading">Format</h2>
+        <div id="aspects" class="button-row">
+          <button class="btn" type="button" data-aspect="16:9">16:9 Long-form</button>
+          <button class="btn" type="button" data-aspect="9:16">9:16 Shorts</button>
+          <button class="btn" type="button" data-aspect="1:1">1:1 Square</button>
+        </div>
+        <div id="fits" class="button-row">
+          <button class="btn" type="button" data-fit="pad">Fit (bars)</button>
+          <button class="btn" type="button" data-fit="crop">Crop to fill</button>
+        </div>
+      </section>
+
+      <section class="edit-panel" aria-labelledby="watermarkHeading">
+        <h2 id="watermarkHeading">Watermark</h2>
+        <div class="edit-row">
+          <label for="wmFile">Logo</label>
+          <input id="wmFile" type="file" accept="image/png">
+        </div>
+        <div id="wmControls" class="text-controls" hidden>
+          <div class="edit-row">
+            <span class="row-label">Corner</span>
+            <div id="corners" class="corner-grid">
+              <button class="btn" type="button" data-corner="tl" aria-label="Top left">↖</button>
+              <button class="btn" type="button" data-corner="tr" aria-label="Top right">↗</button>
+              <button class="btn" type="button" data-corner="bl" aria-label="Bottom left">↙</button>
+              <button class="btn" type="button" data-corner="br" aria-label="Bottom right">↘</button>
+            </div>
+          </div>
+          <div class="edit-row">
+            <label for="wmSize">Size</label>
+            <input id="wmSize" type="range" min="0.05" max="0.3" step="0.01" value="0.15">
+            <output id="wmSizeReadout" class="muted" for="wmSize"></output>
+          </div>
+          <div class="edit-row">
+            <label for="wmOpacity">Opacity</label>
+            <input id="wmOpacity" type="range" min="0.1" max="1" step="0.05" value="0.8">
+            <output id="wmOpacityReadout" class="muted" for="wmOpacity"></output>
+          </div>
+          <div class="edit-row">
+            <button id="wmRemove" class="btn danger" type="button">Remove watermark</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="edit-panel" aria-labelledby="captionsHeading">
+        <h2 id="captionsHeading">Captions</h2>
+        <p class="muted">Times are seconds into the edited clip (after trim and cuts), before any speed change.</p>
+        <div class="edit-row">
+          <label for="capLook">Style</label>
+          <select id="capLook">
+            <option value="box">Black box</option>
+            <option value="outline">Outline</option>
+            <option value="highlight">Yellow highlight</option>
+          </select>
+          <select id="capSize" aria-label="Caption size">
+            <option value="s">Small</option>
+            <option value="m" selected>Medium</option>
+            <option value="l">Large</option>
+          </select>
+          <select id="capPosition" aria-label="Caption position">
+            <option value="bottom">Bottom</option>
+            <option value="middle">Middle</option>
+            <option value="top">Top</option>
+          </select>
+        </div>
+        <div id="captionRows" class="caption-rows"></div>
+        <div class="button-row">
+          <button id="addCaption" class="btn" type="button">Add caption</button>
+          <button id="autoCaptions" class="btn" type="button">Auto-captions from audio</button>
+        </div>
+        <p id="captionStatus" class="muted" role="status" aria-live="polite"></p>
+        <template id="captionRow">
+          <div class="caption-row">
+            <input class="cap-start" type="number" min="0" step="0.1" aria-label="Caption start in seconds">
+            <input class="cap-end" type="number" min="0" step="0.1" aria-label="Caption end in seconds">
+            <input class="cap-text" maxlength="200" placeholder="Caption text" autocomplete="off" aria-label="Caption text">
+            <button class="btn cap-now" type="button" data-field="start">Use current time → start</button>
+            <button class="btn danger cap-remove" type="button" aria-label="Remove caption">✕</button>
+          </div>
+        </template>
+      </section>
+
+      <section class="edit-panel" aria-labelledby="musicHeading">
+        <h2 id="musicHeading">Music</h2>
+        <div class="edit-row">
+          <label for="musicFile">Upload</label>
+          <input id="musicFile" type="file" accept=".mp3,.m4a,.wav,.ogg,audio/*">
+        </div>
+        <div class="edit-row">
+          <label for="musicTrack">Track</label>
+          <select id="musicTrack"></select>
+          <button id="musicRemove" class="btn danger" type="button" disabled>Remove track</button>
+        </div>
+        <div class="edit-row">
+          <label for="musicVolume">Volume</label>
+          <input id="musicVolume" type="range" min="0" max="1" step="0.05" value="0.3">
+          <output id="musicVolumeReadout" class="muted" for="musicVolume"></output>
+        </div>
+        <label class="check"><input id="normalize" type="checkbox" checked> Normalise to -14 LUFS</label>
+      </section>
+
+      <section class="edit-panel" aria-labelledby="audioHeading">
+        <h2 id="audioHeading">Audio</h2>
+        <label class="check"><input id="denoise" type="checkbox"> Reduce background noise</label>
+        <label class="check"><input id="duck" type="checkbox" checked> Duck music under speech</label>
+        <p class="muted">Both run at render time; noise reduction adds processing time.</p>
+      </section>
+
+      <section class="edit-panel" aria-labelledby="speedHeading">
+        <h2 id="speedHeading">Speed</h2>
+        <div class="edit-row">
+          <label for="speed">Speed</label>
+          <input id="speed" type="range" min="0.5" max="2" step="0.05" value="1">
+          <output id="speedReadout" class="muted" for="speed"></output>
+        </div>
+      </section>
+
+      <section class="edit-panel" aria-labelledby="dubHeading">
+        <h2 id="dubHeading">Dub</h2>
+        <div class="edit-row">
+          <label for="dubLang">Into</label>
+          <select id="dubLang"><option value="en">Same language (re-voice)</option></select>
+          <button id="dubStart" class="btn" type="button">Dub clip</button>
+        </div>
+        <p class="muted dub-note">Dubbing runs on this machine's VoiceStudio (4 GB GPU): about one minute of processing per minute of audio, and it keeps going if you close the tab.</p>
+        <p id="dubStatus" class="dub-status" role="status" aria-live="polite"></p>
+      </section>
+
+      <div class="actions">
+        <button id="render" class="btn primary" type="button" disabled>Render</button>
+        <a id="cancel" class="btn">Cancel</a>
+        <span id="rendering" class="rendering" role="status" hidden><span class="spinner"></span> <span id="renderText">Rendering…</span></span>
+        <button id="cancelRender" class="btn danger" type="button" hidden>Cancel render</button>
+      </div>
+    </article>
+  </main>
+
+  <script src="/auth.js"></script>
+  <script type="module">
+    const $ = (id) => document.getElementById(id);
+    const id = location.pathname.split('/').pop();
+    const api = `/api/recordings/${id}`;
+    const MAX_LENGTH = 3600;
+    const DRAFT_KEY = `clip:draft:${id}`;
+    const DRAFT_DELAY_MS = 300;
+    const NUDGE = 0.01;
+    const WATERMARK = '/api/brand/watermark';
+    const MUSIC = '/api/brand/music';
+    const WATERMARK_MARGIN = 0.03; // keep in step with .wm-preview's margin in app.css
+
+    const player = $('player');
+    const overlays = [];
+    let background = '#0b0b0c';
+    let selected = null;
+    let aspect = '16:9';
+    let fit = 'pad';
+    let corner = 'br';
+    let hasWatermark = false;
+    // Kept ranges in recording seconds, so moving the trim never slides a cut off its words.
+    // Infinity: runs to the end of whatever the trim is. formState() converts to the API's trimmed-clip seconds.
+    let keeps = [[0, Infinity]];
+    const MAX_CUTS = 200;
+    const HISTORY_GAP_MS = 400;
+    const undoStack = [];
+    const redoStack = [];
+    let lastCommit = 0;
+
+    let draft = readDraft();
+    let draftTimer;
+    let draftReady = false;
+    let draftDone = false;
+    let lastSaved = null;
+
+    const clamp = (value) => Math.min(Math.max(value, 0), 1);
+
+    function showError(message) {
+      $('notice').textContent = message;
+      $('notice').hidden = false;
+    }
+
+    async function request(url, options) {
+      const response = await fetch(url, options);
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error ?? `Server returned ${response.status}`);
+      return result;
+    }
+
+    // MediaRecorder writes no duration into WebM. Seeking past the end makes the browser
+    // scan the file, after which the scrubber works normally.
+    function repairDuration(video) {
+      video.addEventListener('loadedmetadata', () => {
+        if (video.duration !== Infinity) return;
+        video.addEventListener('durationchange', () => { video.currentTime = 0; }, { once: true });
+        video.currentTime = Number.MAX_SAFE_INTEGER;
+      });
+    }
+
+    // Whole tenths first, so 59.96 carries to 01:00.0 instead of printing 00:60.0.
+    function formatTimecode(seconds) {
+      const tenths = Math.round(seconds * 10);
+      const minutes = String(Math.floor(tenths / 600)).padStart(2, '0');
+      return `${minutes}:${(tenths % 600 / 10).toFixed(1).padStart(4, '0')}`;
+    }
+
+    function parseTimecode(text) {
+      const match = /^(\d+):([0-5]?\d(?:\.\d*)?)$/.exec(text.trim());
+      return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+    }
+
+    function showTrim() {
+      const start = Number($('start').value);
+      const end = Number($('end').value);
+      const tooLong = end - start > MAX_LENGTH;
+      $('readout').textContent = `${start.toFixed(1)}s – ${end.toFixed(1)}s (${(end - start).toFixed(1)}s)`;
+      $('startTime').value = formatTimecode(start);
+      $('endTime').value = formatTimecode(end);
+      $('limit').hidden = !tooLong;
+      $('limit').textContent = `This selection is ${formatTimecode(end - start)} long and renders are limited to 60 minutes. Shorten the trim to render.`;
+      $('render').disabled = tooLong || !$('rendering').hidden;
+      showCuts();
+      drawCaption();
+    }
+
+    // The API's cuts: kept ranges clipped to the trim, in seconds from trim start, rounded to the ms.
+    function trimmedCuts() {
+      const start = Number($('start').value);
+      const end = Number($('end').value);
+      const round = (t) => Math.round(t * 1000) / 1000;
+      return keeps.map(([a, b]) => [round(Math.max(a, start) - start), round(Math.min(b, end) - start)])
+        .filter(([a, b]) => b - a >= 0.1 - 1e-6);
+    }
+
+    // Inverse of trimmedCuts(). A range touching the trim edge stays open-ended, so widening the trim keeps the new part.
+    function fromTrimmedCuts(cuts, { start, end }) {
+      return cuts.map(([a, b]) => [a <= 1e-6 ? 0 : start + a, b >= end - start - 1e-6 ? Infinity : start + b]);
+    }
+
+    const keptLength = () => trimmedCuts().reduce((n, [a, b]) => n + (b - a), 0);
+
+    function showCuts() {
+      const start = Number($('start').value);
+      const end = Number($('end').value);
+      const cuts = trimmedCuts();
+      $('keptReadout').textContent = `${formatTimecode(keptLength())} of ${formatTimecode(end - start)} kept`;
+      $('cutRows').replaceChildren(...keeps.map(([a, b], index) => {
+        const from = Math.max(a, start);
+        const to = Math.min(b, end);
+        if (to - from < 0.1 - 1e-6) return null;
+        const row = document.createElement('li');
+        row.className = 'cut-row';
+        row.dataset.index = index;
+        const label = document.createElement('span');
+        label.textContent = `${formatTimecode(from)} → ${formatTimecode(to)}`;
+        const remove = document.createElement('button');
+        remove.className = 'btn danger cut-remove';
+        remove.type = 'button';
+        remove.textContent = '✕';
+        remove.setAttribute('aria-label', `Remove ${label.textContent}`);
+        row.append(label, remove);
+        return row;
+      }).filter(Boolean));
+      $('split').disabled = keeps.length >= MAX_CUTS;
+      // The strip spans the whole recording: dim outside the trim, shade what the cuts remove.
+      const duration = player.duration;
+      if (!Number.isFinite(duration) || duration <= 0) return;
+      const pct = (t) => `${(Math.min(Math.max(t / duration, 0), 1) * 100).toFixed(3)}%`;
+      const bands = [];
+      const band = (a, b, color) => { if (b > a) bands.push(`${color} ${pct(a)} ${pct(b)}`); };
+      band(0, start, 'var(--timeline-dim)');
+      let cursor = start;
+      for (const [a, b] of cuts) {
+        band(cursor, start + a, 'var(--timeline-cut)');
+        band(start + a, start + b, 'transparent');
+        cursor = start + b;
+      }
+      band(cursor, end, 'var(--timeline-cut)');
+      band(end, duration, 'var(--timeline-dim)');
+      $('cutShade').style.backgroundImage = bands.length ? `linear-gradient(to right, ${bands.join(', ')})` : 'none';
+      showPlayhead();
+    }
+
+    const keepAt = (t) => keeps.findIndex(([a, b]) => t >= a && t < b);
+
+    const FRAME = 1 / 30;
+    let zoom = 1;
+
+    function stepFrame(direction) {
+      if (!Number.isFinite(player.duration)) return;
+      player.pause();
+      player.currentTime = Math.min(Math.max(player.currentTime + direction * FRAME, 0), player.duration);
+    }
+
+    function setZoom(value) {
+      zoom = Math.min(4, Math.max(1, value));
+      $('timeline').style.width = `${zoom * 100}%`;
+      $('zoomReadout').textContent = `${zoom}×`;
+      showPlayhead();
+    }
+
+    function showPlayhead() {
+      const duration = player.duration;
+      if (Number.isFinite(duration) && duration > 0) {
+        $('playhead').style.left = `${player.currentTime / duration * 100}%`;
+        if (zoom > 1) {
+          const view = $('timelineViewport');
+          const x = player.currentTime / duration * $('timeline').clientWidth;
+          if (x < view.scrollLeft + 24 || x > view.scrollLeft + view.clientWidth - 24) {
+            view.scrollLeft = Math.max(0, x - view.clientWidth / 2);
+          }
+        }
+      }
+      const current = String(keepAt(player.currentTime));
+      for (const row of $('cutRows').children) row.classList.toggle('current', row.dataset.index === current);
+    }
+
+    // shortcut: splits at the raw playhead time. Snapping to the quietest sample within ±300 ms needs a peak array,
+    // and the waveform is only a PNG; decode it to peaks (canvas getImageData per column) if mid-syllable splits click.
+    function split() {
+      const t = Math.round(player.currentTime * 1000) / 1000;
+      const index = keepAt(t);
+      if (index < 0 || keeps.length >= MAX_CUTS) return;
+      const [a, b] = keeps[index];
+      if (t - a < 0.1 || b - t < 0.1) return; // the server refuses ranges under 0.1 s
+      keeps.splice(index, 1, [a, t], [t, b]);
+      showCuts();
+    }
+
+    function removeKeep(index) {
+      if (index < 0) return;
+      keeps.splice(index, 1);
+      showCuts();
+    }
+
+    async function removeSilence() {
+      const query = new URLSearchParams({ start: $('start').value, end: $('end').value });
+      $('removeSilence').disabled = true;
+      try {
+        const { cuts } = await request(`${api}/silence?${query}`);
+        keeps = fromTrimmedCuts(cuts, { start: Number($('start').value), end: Number($('end').value) });
+        showCuts();
+        commit();
+      } finally {
+        $('removeSilence').disabled = false;
+      }
+    }
+
+    function seekTimeline(event) {
+      const box = $('timeline').getBoundingClientRect();
+      if (Number.isFinite(player.duration)) player.currentTime = (event.clientX - box.left) / box.width * player.duration;
+    }
+
+    function setDuration() {
+      if (!Number.isFinite(player.duration)) return;
+      const wasUnset = Number($('end').max) === 0;
+      // Round up so the 0.1 step never cuts off the last moments.
+      const max = Math.ceil(player.duration * 10) / 10;
+      $('start').max = max;
+      $('end').max = max;
+      if (wasUnset) {
+        $('end').value = draft?.trim?.end ?? max;
+        $('start').value = draft?.trim?.start ?? 0;
+        lastSaved = JSON.stringify(formState()); // an untouched form is not a draft
+      }
+      showTrim();
+      startHistory();
+    }
+
+    function moveStart() {
+      const end = Number($('end').value);
+      if (Number($('start').value) >= end) $('start').value = end - 0.1;
+      player.currentTime = Number($('start').value);
+      showTrim();
+    }
+
+    function moveEnd() {
+      const start = Number($('start').value);
+      if (Number($('end').value) <= start) $('end').value = start + 0.1;
+      showTrim();
+    }
+
+    // Commits on change, not input, so half-typed text is never treated as invalid. showTrim rewrites the box either way.
+    function typeTrim(slider, move) {
+      const time = parseTimecode($(`${slider}Time`).value);
+      const other = Number($(slider === 'start' ? 'end' : 'start').value);
+      const ordered = slider === 'start' ? time < other : time > other;
+      if (time === null || !ordered || time > Number($(slider).max)) return showTrim();
+      $(slider).value = time;
+      move();
+      player.currentTime = Number($(slider).value);
+    }
+
+    function setBackground(color) {
+      background = color;
+      $('stage').style.setProperty('--edit-bg', color);
+      $('customColor').value = color;
+      for (const swatch of $('swatches').querySelectorAll('.swatch')) {
+        swatch.setAttribute('aria-pressed', String(swatch.dataset.color === color));
+      }
+    }
+
+    function draw(overlay) {
+      const { el } = overlay;
+      el.textContent = overlay.text;
+      el.dataset.font = overlay.font;
+      el.classList.toggle('bold', overlay.bold || overlay.font === 'sans-bold');
+      el.classList.toggle('selected', overlay === selected);
+      el.setAttribute('aria-label', `Text overlay: ${overlay.text}`);
+      el.style.setProperty('--x', overlay.x);
+      el.style.setProperty('--y', overlay.y);
+      el.style.setProperty('--size', overlay.size);
+      el.style.setProperty('--color', overlay.color);
+    }
+
+    function select(overlay) {
+      const previous = selected;
+      selected = overlay;
+      if (previous) draw(previous);
+      $('textControls').hidden = !overlay;
+      if (!overlay) return;
+      draw(overlay);
+      $('overlayText').value = overlay.text;
+      $('overlaySize').value = overlay.size;
+      $('sizeReadout').textContent = overlay.size;
+      $('overlayFont').value = overlay.font;
+      $('overlayColor').value = overlay.color;
+      $('overlayBold').checked = overlay.bold;
+      $('overlayStart').value = overlay.start ?? '';
+      $('overlayEnd').value = overlay.end ?? '';
+    }
+
+    function update(change) {
+      Object.assign(selected, change);
+      draw(selected);
+    }
+
+    function removeSelected() {
+      if (!selected) return;
+      overlays.splice(overlays.indexOf(selected), 1);
+      selected.el.remove();
+      select(null);
+    }
+
+    // x/y map to (frame - box) * fraction, as in the render, so 0..1 always keeps the box inside.
+    function startDrag(event, overlay) {
+      event.preventDefault();
+      overlay.el.focus();
+      select(overlay);
+      const { el } = overlay;
+      el.setPointerCapture(event.pointerId);
+      const frame = $('layer').getBoundingClientRect();
+      const box = el.getBoundingClientRect();
+      const roomX = frame.width - box.width;
+      const roomY = frame.height - box.height;
+      const { clientX, clientY } = event;
+      const { x, y } = overlay;
+
+      const onMove = (move) => {
+        if (roomX > 0) overlay.x = clamp(x + (move.clientX - clientX) / roomX);
+        if (roomY > 0) overlay.y = clamp(y + (move.clientY - clientY) / roomY);
+        draw(overlay);
+      };
+      el.addEventListener('pointermove', onMove);
+      el.addEventListener('pointerup', () => el.removeEventListener('pointermove', onMove), { once: true });
+      el.addEventListener('pointercancel', () => el.removeEventListener('pointermove', onMove), { once: true });
+    }
+
+    function nudge(event, overlay) {
+      const move = { ArrowLeft: [-NUDGE, 0], ArrowRight: [NUDGE, 0], ArrowUp: [0, -NUDGE], ArrowDown: [0, NUDGE] }[event.key];
+      if (!move) return;
+      event.preventDefault();
+      overlay.x = clamp(overlay.x + move[0]);
+      overlay.y = clamp(overlay.y + move[1]);
+      draw(overlay);
+    }
+
+    function createOverlay(fields) {
+      const overlay = {
+        text: 'Your text', x: 0.5, y: 0.5, size: 48, color: '#ffffff', bold: false, font: 'sans', start: null, end: null, ...fields,
+        el: document.createElement('div'),
+      };
+      overlay.el.className = 'text-overlay';
+      overlay.el.tabIndex = 0;
+      overlay.el.setAttribute('role', 'button');
+      overlay.el.addEventListener('pointerdown', (event) => startDrag(event, overlay));
+      overlay.el.addEventListener('focus', () => select(overlay));
+      overlay.el.addEventListener('keydown', (event) => nudge(event, overlay));
+      overlays.push(overlay);
+      $('layer').append(overlay.el);
+      return overlay;
+    }
+
+    function addText() {
+      select(createOverlay());
+      $('overlayText').select();
+    }
+
+    const percent = (value) => `${Math.round(value * 100)}%`;
+
+    function press(group, attribute, value) {
+      for (const button of $(group).querySelectorAll('button')) {
+        button.setAttribute('aria-pressed', String(button.dataset[attribute] === value));
+      }
+    }
+
+    function setAspect(value) {
+      aspect = value;
+      $('stage').dataset.aspect = value;
+      press('aspects', 'aspect', value);
+    }
+
+    function setFit(value) {
+      fit = value;
+      $('stage').dataset.fit = value;
+      press('fits', 'fit', value);
+    }
+
+    function drawWatermark() {
+      const preview = $('wmPreview');
+      preview.dataset.corner = corner;
+      preview.style.setProperty('--wm-size', $('wmSize').value);
+      preview.style.setProperty('--wm-opacity', $('wmOpacity').value);
+      press('corners', 'corner', corner);
+      $('wmSizeReadout').textContent = percent($('wmSize').value);
+      $('wmOpacityReadout').textContent = percent($('wmOpacity').value);
+    }
+
+    function setWatermark(present) {
+      hasWatermark = present;
+      $('wmPreview').hidden = !present;
+      $('wmControls').hidden = !present;
+      if (present) $('wmPreview').src = `${WATERMARK}?t=${Date.now()}`; // same URL, new logo
+    }
+
+    // Reports failures in the notice instead of leaving a rejected promise behind a button.
+    const guarded = (action) => async (event) => {
+      $('notice').hidden = true;
+      try {
+        await action(event);
+      } catch (err) {
+        showError(err.message);
+      }
+    };
+
+    async function uploadWatermark({ target }) {
+      const [file] = target.files;
+      if (!file) return;
+      try {
+        await request(WATERMARK, { method: 'POST', body: file });
+        setWatermark(true);
+      } finally {
+        target.value = '';
+      }
+    }
+
+    async function removeWatermark() {
+      await request(WATERMARK, { method: 'DELETE' });
+      setWatermark(false);
+    }
+
+    // Seconds into the edited clip, the captions' time base: removed stretches before the playhead don't count.
+    function trimmedTime() {
+      const now = player.currentTime - Number($('start').value);
+      let edited = 0;
+      for (const [a, b] of trimmedCuts()) {
+        edited += Math.min(Math.max(now - a, 0), b - a);
+        if (now < b) break;
+      }
+      return edited;
+    }
+
+    const captionRows = () => [...$('captionRows').children];
+    const captionText = (row) => row.querySelector('.cap-text').value;
+
+    function drawCaption() {
+      const now = trimmedTime();
+      const rows = captionRows().filter((row) => captionText(row).trim());
+      const active = rows.find((row) => now >= Number(row.querySelector('.cap-start').value)
+        && now <= Number(row.querySelector('.cap-end').value));
+      // Static approximation: outside every caption, keep the first one on screen to judge its look.
+      const shown = active ?? rows[0];
+      Object.assign($('capPreview').dataset, { look: $('capLook').value, size: $('capSize').value, position: $('capPosition').value });
+      $('capPreview').hidden = !shown;
+      if (shown) $('capPreview').textContent = captionText(shown);
+    }
+
+    function appendCaption(start, end, text) {
+      const row = $('captionRow').content.firstElementChild.cloneNode(true);
+      row.querySelector('.cap-start').value = start;
+      row.querySelector('.cap-end').value = end;
+      row.querySelector('.cap-text').value = text;
+      $('captionRows').append(row);
+      return row;
+    }
+
+    function addCaption() {
+      const now = trimmedTime();
+      const length = keptLength();
+      appendCaption(now.toFixed(1), Math.min(now + 2, length).toFixed(1), '').querySelector('.cap-text').focus();
+    }
+
+    // One button per row: it fills start, then end, then start again; its label names the next field.
+    function onCaptionClick({ target }) {
+      const row = target.closest('.caption-row');
+      if (target.classList.contains('cap-remove')) {
+        row.remove();
+        drawCaption();
+      }
+      if (target.classList.contains('cap-now')) {
+        const { field } = target.dataset;
+        row.querySelector(`.cap-${field}`).value = trimmedTime().toFixed(1);
+        target.dataset.field = field === 'start' ? 'end' : 'start';
+        target.textContent = `Use current time → ${target.dataset.field}`;
+        drawCaption();
+      }
+    }
+
+    async function loadMusic(selectedId = '') {
+      const tracks = await request(MUSIC);
+      $('musicTrack').replaceChildren(new Option('None', ''), ...tracks.map(({ id, name }) => new Option(name, id)));
+      $('musicTrack').value = selectedId;
+      if ($('musicTrack').selectedIndex < 0) $('musicTrack').value = ''; // a draft's track may have been deleted
+      $('musicRemove').disabled = !$('musicTrack').value;
+    }
+
+    async function uploadMusic({ target }) {
+      const [file] = target.files;
+      if (!file) return;
+      try {
+        const { id } = await request(MUSIC, {
+          method: 'POST',
+          headers: { 'x-filename': encodeURIComponent(file.name) },
+          body: file,
+        });
+        await loadMusic(id);
+      } finally {
+        target.value = '';
+      }
+    }
+
+    async function removeMusic() {
+      await request(`${MUSIC}/${$('musicTrack').value}`, { method: 'DELETE' });
+      await loadMusic();
+    }
+
+    // Zoom rows keep their focus point in data-x / data-y: 0..1 across the picture.
+    const zoomRows = () => [...$('zoomRows').children];
+    let picking = null; // the zoom row waiting for a click on the video
+
+    function labelZooms() {
+      for (const row of zoomRows()) {
+        row.querySelector('.zoom-pick').textContent = row === picking
+          ? 'Click the video…'
+          : `Point ${percent(row.dataset.x)}, ${percent(row.dataset.y)}`;
+      }
+      $('stage').classList.toggle('picking', Boolean(picking));
+    }
+
+    function appendZoom({ start, end, level = 2, x = 0.5, y = 0.5 }) {
+      const row = $('zoomRow').content.firstElementChild.cloneNode(true);
+      row.querySelector('.zoom-start').value = start;
+      row.querySelector('.zoom-end').value = end;
+      row.querySelector('.zoom-level').value = level;
+      Object.assign(row.dataset, { x, y });
+      $('zoomRows').append(row);
+      return row;
+    }
+
+    function addZoom() {
+      const now = trimmedTime();
+      picking = appendZoom({ start: now.toFixed(1), end: Math.min(now + 3, keptLength()).toFixed(1) });
+      labelZooms(); // straight into picking: a zoom is no use until it knows where to look
+      drawTimed();
+    }
+
+    function onZoomClick({ target }) {
+      const row = target.closest('.zoom-row');
+      if (target.classList.contains('zoom-remove')) {
+        if (picking === row) picking = null;
+        row.remove();
+      } else if (target.classList.contains('zoom-pick')) {
+        picking = picking === row ? null : row;
+      } else return;
+      labelZooms();
+      drawTimed();
+    }
+
+    // Capture phase, so the click sets the point instead of toggling playback.
+    function pickPoint(event) {
+      if (!picking) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const box = player.getBoundingClientRect();
+      const scale = (fit === 'crop' ? Math.max : Math.min)(box.width / player.videoWidth, box.height / player.videoHeight);
+      const w = player.videoWidth * scale;
+      const h = player.videoHeight * scale;
+      picking.dataset.x = clamp((event.clientX - box.left - (box.width - w) / 2) / w).toFixed(3);
+      picking.dataset.y = clamp((event.clientY - box.top - (box.height - h) / 2) / h).toFixed(3);
+      picking = null;
+      labelZooms();
+      drawTimed();
+    }
+
+    // Timed text dims outside its range, and the zoom under the playhead is previewed by scaling the player.
+    // shortcut: the preview scales the whole player box, so with bars (Fit) it is a little off; the render zooms the picture only.
+    function drawTimed() {
+      const now = trimmedTime();
+      for (const overlay of overlays) {
+        overlay.el.classList.toggle('off', overlay.start != null && (now < overlay.start || now > overlay.end));
+      }
+      const row = picking ? null : zoomRows().find((r) => now >= Number(r.querySelector('.zoom-start').value)
+        && now <= Number(r.querySelector('.zoom-end').value));
+      player.style.transformOrigin = row ? `${row.dataset.x * 100}% ${row.dataset.y * 100}%` : '';
+      player.style.transform = row ? `scale(${row.querySelector('.zoom-level').value})` : '';
+    }
+
+    function setOverlayTiming() {
+      const from = $('overlayStart').value;
+      const to = $('overlayEnd').value;
+      // One blank end means "from the start" or "to the end"; both blank means the whole clip.
+      update(from === '' && to === '' ? { start: null, end: null }
+        : { start: Number(from) || 0, end: to === '' ? Number(keptLength().toFixed(1)) : Number(to) });
+      drawTimed();
+    }
+
+    function showRangeReadouts() {
+      $('musicVolumeReadout').textContent = percent($('musicVolume').value);
+      $('speedReadout').textContent = `${Number($('speed').value).toFixed(2)}×`;
+    }
+
+    // Everything on the form, blank rows included: render() drops what the server would refuse, a draft must not.
+    function formState() {
+      return {
+        trim: { start: Number($('start').value), end: Number($('end').value) },
+        cuts: trimmedCuts(),
+        background,
+        overlays: overlays.map(({ el, ...overlay }) => overlay),
+        aspect,
+        fit,
+        speed: Number($('speed').value),
+        normalize: $('normalize').checked,
+        denoise: $('denoise').checked,
+        duck: $('duck').checked,
+        captions: captionRows().map((row) => ({
+          start: Number(row.querySelector('.cap-start').value),
+          end: Number(row.querySelector('.cap-end').value),
+          text: captionText(row),
+        })),
+        captionStyle: { look: $('capLook').value, size: $('capSize').value, position: $('capPosition').value },
+        zooms: zoomRows().map((row) => ({
+          start: Number(row.querySelector('.zoom-start').value),
+          end: Number(row.querySelector('.zoom-end').value),
+          level: Number(row.querySelector('.zoom-level').value),
+          x: Number(row.dataset.x),
+          y: Number(row.dataset.y),
+        })),
+        watermark: { corner, size: Number($('wmSize').value), opacity: Number($('wmOpacity').value), margin: WATERMARK_MARGIN },
+        music: { id: $('musicTrack').value, volume: Number($('musicVolume').value) },
+      };
+    }
+
+    function readDraft() {
+      try {
+        return JSON.parse(localStorage.getItem(DRAFT_KEY));
+      } catch {
+        return null;
+      }
+    }
+
+    // Trim and music id wait for setDuration and loadMusic: their controls cannot hold the value until then.
+    function applyDraft({ trim, cuts, background: color, overlays: savedOverlays, aspect: savedAspect, fit: savedFit, speed, normalize, denoise = false, duck = true, captions, captionStyle = {}, zooms = [], watermark, music }) {
+      keeps = cuts ? fromTrimmedCuts(cuts, trim) : [[0, Infinity]]; // drafts from before cuts have none
+      setBackground(color);
+      for (const overlay of savedOverlays) draw(createOverlay(overlay));
+      setAspect(savedAspect);
+      setFit(savedFit);
+      $('speed').value = speed;
+      $('normalize').checked = normalize;
+      $('denoise').checked = denoise;
+      $('duck').checked = duck;
+      for (const { start, end, text } of captions) appendCaption(start, end, text);
+      // Drafts from before caption styles and zooms have neither.
+      $('capLook').value = captionStyle.look ?? 'box';
+      $('capSize').value = captionStyle.size ?? 'm';
+      $('capPosition').value = captionStyle.position ?? 'bottom';
+      zooms.forEach(appendZoom);
+      labelZooms();
+      corner = watermark.corner;
+      $('wmSize').value = watermark.size;
+      $('wmOpacity').value = watermark.opacity;
+      $('musicVolume').value = music.volume;
+    }
+
+    // applyDraft() only appends, so empty what it appends to first.
+    function resetForm() {
+      select(null);
+      for (const { el } of overlays.splice(0)) el.remove();
+      $('captionRows').replaceChildren();
+      $('zoomRows').replaceChildren();
+      picking = null;
+    }
+
+    function restore(json) {
+      const state = JSON.parse(json);
+      resetForm();
+      applyDraft(state);
+      $('start').value = state.trim.start;
+      $('end').value = state.trim.end;
+      $('musicTrack').value = state.music.id;
+      if ($('musicTrack').selectedIndex < 0) $('musicTrack').value = ''; // the track may have been deleted since
+      $('musicRemove').disabled = !$('musicTrack').value;
+      drawWatermark();
+      showRangeReadouts();
+      showTrim();
+      scheduleDraft();
+    }
+
+    // Top of undoStack is always the current form. Edits under 400 ms apart fold into one step, so a slider drag undoes whole.
+    function commit() {
+      if (!undoStack.length) return;
+      const state = JSON.stringify(formState());
+      if (state === undoStack.at(-1)) return;
+      const now = Date.now();
+      if (now - lastCommit < HISTORY_GAP_MS && undoStack.length > 1) undoStack[undoStack.length - 1] = state;
+      else undoStack.push(state);
+      lastCommit = now;
+      redoStack.length = 0;
+    }
+
+    // Starts once the trim and the music list can both hold their values, so the first snapshot is the real form.
+    function startHistory() {
+      if (undoStack.length || !draftReady || Number($('end').max) === 0) return;
+      undoStack.push(JSON.stringify(formState()));
+    }
+
+    function undo() {
+      if (undoStack.length < 2) return;
+      redoStack.push(undoStack.pop());
+      restore(undoStack.at(-1));
+      lastCommit = 0; // the next edit is its own step
+    }
+
+    function redo() {
+      if (!redoStack.length) return;
+      undoStack.push(redoStack.pop());
+      restore(undoStack.at(-1));
+      lastCommit = 0;
+    }
+
+    function saveDraft() {
+      const state = JSON.stringify(formState());
+      if (draftDone || !draftReady || Number($('end').max) === 0 || state === lastSaved) return;
+      localStorage.setItem(DRAFT_KEY, state);
+      lastSaved = state;
+    }
+
+    function scheduleDraft() {
+      clearTimeout(draftTimer);
+      draftTimer = setTimeout(saveDraft, DRAFT_DELAY_MS);
+    }
+
+    // Render: ffmpeg runs as a server job, so progress is polled and the job survives a reload.
+    const RENDER_KEY = `clip:render:${id}`;
+    let renderTimer;
+
+    function setRendering(text) {
+      $('rendering').hidden = !text;
+      if (text) $('renderText').textContent = text;
+    }
+
+    function resetRender() {
+      $('cancelRender').hidden = true;
+      setRendering('');
+      showTrim(); // restores the button unless the trim is still too long
+    }
+
+    function renderProgress(job) {
+      if (job.state === 'done') return null;
+      if (job.step === 'queued') return 'Queued…';
+      if (job.step === 'preparing') return 'Preparing…';
+      if (job.step === 'finishing') return 'Finishing…';
+      return `Rendering… ${Math.round((job.progress ?? 0) * 100)}%`;
+    }
+
+    async function pollRender(jobId) {
+      clearTimeout(renderTimer);
+      try {
+        const job = await request(`/api/renders/${jobId}`);
+        if (job.state === 'done') {
+          localStorage.removeItem(RENDER_KEY);
+          clearTimeout(draftTimer);
+          draftDone = true; // no click during the redirect may bring it back
+          localStorage.removeItem(DRAFT_KEY);
+          return void (location.href = job.url);
+        }
+        if (job.state === 'error') {
+          localStorage.removeItem(RENDER_KEY);
+          resetRender();
+          return showError(`Could not render: ${job.error}`);
+        }
+        if (job.state === 'canceled') {
+          localStorage.removeItem(RENDER_KEY);
+          resetRender();
+          return;
+        }
+        setRendering(renderProgress(job));
+      } catch (err) {
+        if (/not found/i.test(err.message)) { // the server restarted and forgot the job
+          localStorage.removeItem(RENDER_KEY);
+          resetRender();
+          return showError(`Could not render: ${err.message}`);
+        }
+        setRendering(`Waiting for the renderer… (${err.message})`);
+      }
+      renderTimer = setTimeout(() => pollRender(jobId), 1000);
+    }
+
+    async function cancelRender() {
+      $('cancelRender').disabled = true;
+      try {
+        const saved = JSON.parse(localStorage.getItem(RENDER_KEY) ?? 'null');
+        if (saved?.jobId) await request(`/api/renders/${saved.jobId}`, { method: 'DELETE' });
+      } catch (err) {
+        showError(`Could not cancel: ${err.message}`);
+      } finally {
+        $('cancelRender').disabled = false;
+        clearTimeout(renderTimer);
+        localStorage.removeItem(RENDER_KEY);
+        resetRender();
+      }
+    }
+
+    async function render() {
+      $('notice').hidden = true;
+      $('render').disabled = true;
+      $('cancelRender').hidden = false;
+      setRendering('Starting…');
+      const state = formState();
+      const edit = {
+        ...state,
+        // A split nobody removed is not a cut: rejoin it, or the join's fades dip the audio.
+        cuts: state.cuts.reduce((out, [a, b]) => {
+          if (out.length && a - out.at(-1)[1] < 1e-6) out.at(-1)[1] = b;
+          else out.push([a, b]);
+          return out;
+        }, []),
+        overlays: state.overlays.filter((o) => o.text.trim()),
+        captions: state.captions.filter((c) => c.text.trim()),
+        zooms: state.zooms.filter((z) => z.end > z.start),
+        watermark: hasWatermark ? state.watermark : null,
+        music: state.music.id ? state.music : null,
+      };
+      try {
+        const { jobId } = await request(`${api}/render`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(edit),
+        });
+        localStorage.setItem(RENDER_KEY, JSON.stringify({ jobId }));
+        pollRender(jobId);
+      } catch (err) {
+        showError(`Could not render: ${err.message}`);
+        resetRender();
+      }
+    }
+
+    function onKeydown(event) {
+      if (event.target.closest('input, select, textarea')) return;
+      if (event.defaultPrevented) return; // an overlay already handled this key
+      const mod = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+      if (mod && key === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (mod || event.altKey) return;
+      if (key === ' ') {
+        if (event.target === player) return; // the focused player toggles itself
+        event.preventDefault(); // a focused button would otherwise activate: Space on Render renders
+        if (player.paused) player.play().catch(() => {});
+        else player.pause();
+      } else if (key === 'arrowleft' || key === ',') {
+        event.preventDefault();
+        stepFrame(-1);
+      } else if (key === 'arrowright' || key === '.') {
+        event.preventDefault();
+        stepFrame(1);
+      } else if (key === 'i') {
+        $('start').value = player.currentTime;
+        moveStart();
+      } else if (key === 'o') {
+        $('end').value = player.currentTime;
+        moveEnd();
+      } else if (key === 'delete' || key === 'backspace') {
+        event.preventDefault();
+        removeSelected();
+      }
+    }
+
+    for (const swatch of $('swatches').querySelectorAll('.swatch')) {
+      swatch.style.setProperty('--swatch', swatch.dataset.color);
+      swatch.addEventListener('click', () => setBackground(swatch.dataset.color));
+    }
+    $('customColor').addEventListener('input', (event) => setBackground(event.target.value));
+    $('start').addEventListener('input', moveStart);
+    $('end').addEventListener('input', moveEnd);
+    $('startTime').addEventListener('change', () => typeTrim('start', moveStart));
+    $('endTime').addEventListener('change', () => typeTrim('end', moveEnd));
+    $('addText').addEventListener('click', addText);
+    $('removeText').addEventListener('click', removeSelected);
+    $('overlayText').addEventListener('input', (event) => update({ text: event.target.value }));
+    $('overlaySize').addEventListener('input', (event) => {
+      update({ size: Number(event.target.value) });
+      $('sizeReadout').textContent = event.target.value;
+    });
+    $('overlayFont').addEventListener('change', (event) => update({ font: event.target.value }));
+    $('overlayColor').addEventListener('input', (event) => update({ color: event.target.value }));
+    $('overlayBold').addEventListener('change', (event) => update({ bold: event.target.checked }));
+    $('overlayStart').addEventListener('input', setOverlayTiming);
+    $('overlayEnd').addEventListener('input', setOverlayTiming);
+    $('addZoom').addEventListener('click', addZoom);
+    $('zoomRows').addEventListener('click', onZoomClick);
+    $('zoomRows').addEventListener('input', drawTimed);
+    $('stage').addEventListener('click', pickPoint, true);
+    for (const name of ['capLook', 'capSize', 'capPosition']) $(name).addEventListener('change', drawCaption);
+    for (const button of $('aspects').querySelectorAll('button')) {
+      button.addEventListener('click', () => setAspect(button.dataset.aspect));
+    }
+    for (const button of $('fits').querySelectorAll('button')) {
+      button.addEventListener('click', () => setFit(button.dataset.fit));
+    }
+    for (const button of $('corners').querySelectorAll('button')) {
+      button.addEventListener('click', () => { corner = button.dataset.corner; drawWatermark(); });
+    }
+    $('wmFile').addEventListener('change', guarded(uploadWatermark));
+    $('wmRemove').addEventListener('click', guarded(removeWatermark));
+    $('wmSize').addEventListener('input', drawWatermark);
+    $('wmOpacity').addEventListener('input', drawWatermark);
+    $('addCaption').addEventListener('click', addCaption);
+    $('captionRows').addEventListener('click', onCaptionClick);
+    $('captionRows').addEventListener('input', drawCaption);
+    $('musicFile').addEventListener('change', guarded(uploadMusic));
+    $('musicRemove').addEventListener('click', guarded(removeMusic));
+    $('musicTrack').addEventListener('change', (event) => { $('musicRemove').disabled = !event.target.value; });
+    $('musicVolume').addEventListener('input', showRangeReadouts);
+    $('speed').addEventListener('input', showRangeReadouts);
+    player.addEventListener('timeupdate', drawCaption);
+    player.addEventListener('timeupdate', drawTimed);
+    player.addEventListener('timeupdate', showPlayhead);
+    player.addEventListener('seeked', showPlayhead);
+    $('timeline').addEventListener('click', seekTimeline);
+    $('prevFrame').addEventListener('click', () => stepFrame(-1));
+    $('nextFrame').addEventListener('click', () => stepFrame(1));
+    $('zoomIn').addEventListener('click', () => setZoom(zoom * 2));
+    $('zoomOut').addEventListener('click', () => setZoom(zoom / 2));
+    $('split').addEventListener('click', split);
+    $('removeRange').addEventListener('click', () => removeKeep(keepAt(player.currentTime)));
+    $('removeSilence').addEventListener('click', guarded(removeSilence));
+    $('cutRows').addEventListener('click', ({ target }) => {
+      if (target.classList.contains('cut-remove')) removeKeep(Number(target.closest('.cut-row').dataset.index));
+    });
+    $('render').addEventListener('click', render);
+    $('cancelRender').addEventListener('click', cancelRender);
+    try {
+      const savedRender = JSON.parse(localStorage.getItem(RENDER_KEY) ?? 'null');
+      if (savedRender?.jobId) {
+        $('render').disabled = true;
+        $('cancelRender').hidden = false;
+        setRendering('Resuming…');
+        pollRender(savedRender.jobId);
+      }
+    } catch { localStorage.removeItem(RENDER_KEY); }
+    document.addEventListener('keydown', onKeydown);
+    // Listens at the root because edits arrive by every route: sliders, buttons, overlay drags, arrow keys.
+    for (const type of ['input', 'change', 'click', 'pointerup', 'keyup']) {
+      document.addEventListener(type, scheduleDraft);
+      document.addEventListener(type, commit);
+    }
+    player.addEventListener('durationchange', setDuration);
+    player.addEventListener('error', () => showError('This recording could not be loaded.'));
+
+    // Dub: the job runs server-side; localStorage only remembers which job to keep polling after a reload.
+    const DUB_KEY = `clip:dub:${id}`;
+    const DUB_STEPS = { upload: 'Uploading to VoiceStudio…', transcribe: 'Transcribing…', translate: 'Translating…', mux: 'Mixing…' };
+    let dubTimer;
+
+    function dubStatus(text, href) {
+      const status = $('dubStatus');
+      status.replaceChildren(text);
+      if (href) {
+        const link = document.createElement('a');
+        link.href = href;
+        link.textContent = 'watch it';
+        status.append(' ', link);
+      }
+    }
+
+    async function pollDub(jobId, langName) {
+      clearTimeout(dubTimer);
+      $('dubStart').disabled = true;
+      try {
+        const job = await request(`/api/dubs/${jobId}`);
+        if (job.state === 'done' || job.state === 'error') {
+          localStorage.removeItem(DUB_KEY);
+          $('dubStart').disabled = false;
+          return job.state === 'done' ? dubStatus('Dubbed:', job.url) : dubStatus(`Dub failed: ${job.error}`);
+        }
+        dubStatus(job.step === 'generate'
+          ? `Generating ${langName} speech… — about a minute per minute of audio on this GPU`
+          : DUB_STEPS[job.step] ?? 'Queued…');
+      } catch (err) {
+        if (/not found/i.test(err.message)) { // the server restarted and forgot the job
+          localStorage.removeItem(DUB_KEY);
+          $('dubStart').disabled = false;
+          return dubStatus(err.message);
+        }
+        dubStatus(`Checking dub status… (${err.message})`);
+      }
+      dubTimer = setTimeout(() => pollDub(jobId, langName), 2000);
+    }
+
+    async function startDub() {
+      const select = $('dubLang');
+      const targetLang = select.value;
+      const langName = select.selectedOptions[0].dataset.name ?? 'English';
+      $('dubStart').disabled = true;
+      dubStatus('Starting…');
+      try {
+        const { jobId } = await request(`${api}/dub`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetLang }),
+        });
+        localStorage.setItem(DUB_KEY, JSON.stringify({ jobId, recordingId: id, langName }));
+        pollDub(jobId, langName);
+      } catch (err) {
+        $('dubStart').disabled = false;
+        dubStatus(`Dub failed: ${err.message}`);
+      }
+    }
+
+    async function loadDub() {
+      $('dubStart').addEventListener('click', startDub);
+      try {
+        const { languages, warning } = await request('/api/dub/languages');
+        for (const { code, name } of languages.filter((l) => l.installed)) {
+          $('dubLang').append(new Option(name, code));
+          $('dubLang').lastElementChild.dataset.name = name;
+        }
+        if (warning) dubStatus(warning);
+      } catch (err) {
+        $('dubStart').disabled = true;
+        dubStatus(err.message);
+      }
+      try {
+        const saved = JSON.parse(localStorage.getItem(DUB_KEY));
+        if (saved?.jobId) pollDub(saved.jobId, saved.langName ?? 'translated');
+      } catch { localStorage.removeItem(DUB_KEY); }
+    }
+    loadDub();
+
+    $('cancel').href = `/watch/${id}`;
+    setBackground(background);
+    setAspect(aspect);
+    setFit(fit);
+    if (draft) {
+      try {
+        applyDraft(draft);
+        $('draftNote').hidden = false;
+      } catch { // a draft from an older version of this form
+        localStorage.removeItem(DRAFT_KEY);
+        draft = null;
+      }
+    }
+
+    // Auto-captions: transcript times are in recording seconds, captions are in edited seconds,
+    // so every kept range is walked in order and the segment is clipped to it.
+    const AUTO_KEY = `clip:autoCaptions:${id}`;
+    let autoTimer;
+
+    function autoStatus(text) {
+      $('captionStatus').textContent = text;
+    }
+
+    function editedCaptions(segments) {
+      const start = Number($('start').value);
+      const out = [];
+      let offset = 0;
+      for (const [a, b] of trimmedCuts()) {
+        const from = a + start;
+        const to = b + start;
+        for (const segment of segments) {
+          const first = Math.max(segment.start, from);
+          const last = Math.min(segment.end, to);
+          if (last - first >= 0.2) out.push({ start: offset + first - from, end: offset + last - from, text: segment.text });
+        }
+        offset += b - a;
+      }
+      return out;
+    }
+
+    function insertCaptions(segments) {
+      $('captionRows').replaceChildren();
+      const length = keptLength();
+      for (const { start, end, text } of editedCaptions(segments)) {
+        // Two decimals, floored, so rounding can never push a cue past the trimmed clip.
+        const from = Math.floor(Math.min(start, length) * 100) / 100;
+        const to = Math.floor(Math.min(end, length) * 100) / 100;
+        if (to > from) appendCaption(from.toFixed(2), to.toFixed(2), text);
+      }
+      drawCaption();
+    }
+
+    async function pollAutoCaptions(jobId) {
+      clearTimeout(autoTimer);
+      $('autoCaptions').disabled = true;
+      try {
+        const job = await request(`/api/transcribe/${jobId}`);
+        if (job.state === 'done') {
+          localStorage.removeItem(AUTO_KEY);
+          $('autoCaptions').disabled = false;
+          insertCaptions(job.segments);
+          autoStatus(`Added ${captionRows().length} captions from the audio.`);
+          return;
+        }
+        if (job.state === 'error') {
+          localStorage.removeItem(AUTO_KEY);
+          $('autoCaptions').disabled = false;
+          autoStatus(`Auto-captions failed: ${job.error}`);
+          return;
+        }
+        autoStatus(job.step === 'transcribe'
+          ? 'Transcribing the audio… — about a minute per hour of audio on this machine'
+          : 'Uploading to VoiceStudio…');
+      } catch (err) {
+        if (/not found/i.test(err.message)) { // the server restarted and forgot the job
+          localStorage.removeItem(AUTO_KEY);
+          return startAutoCaptions({ confirmed: true });
+        }
+        autoStatus(`Checking auto-captions… (${err.message})`);
+      }
+      autoTimer = setTimeout(() => pollAutoCaptions(jobId), 2000);
+    }
+
+    async function startAutoCaptions({ confirmed = false } = {}) {
+      const existing = captionRows().some((row) => captionText(row).trim());
+      if (existing && !confirmed && !confirm('Replace the captions already in this edit?')) return;
+      clearTimeout(autoTimer);
+      $('autoCaptions').disabled = true;
+      autoStatus('Starting…');
+      try {
+        const result = await request(`${api}/transcribe`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        if (result.segments) { // a transcript saved by an earlier run
+          insertCaptions(result.segments);
+          autoStatus(`Added ${captionRows().length} captions from the saved transcript.`);
+          $('autoCaptions').disabled = false;
+          return;
+        }
+        localStorage.setItem(AUTO_KEY, JSON.stringify({ jobId: result.jobId }));
+        pollAutoCaptions(result.jobId);
+      } catch (err) {
+        $('autoCaptions').disabled = false;
+        autoStatus(`Auto-captions failed: ${err.message}`);
+      }
+    }
+
+    $('autoCaptions').addEventListener('click', startAutoCaptions);
+    try {
+      const savedAuto = JSON.parse(localStorage.getItem(AUTO_KEY) ?? 'null');
+      if (savedAuto?.jobId) pollAutoCaptions(savedAuto.jobId);
+    } catch { localStorage.removeItem(AUTO_KEY); }
+
+    drawWatermark();
+    showRangeReadouts();
+
+    try {
+      const recording = await request(api);
+      if (recording.waveform) $('timeline').style.backgroundImage = `url("${recording.waveform}")`;
+      document.title = `Edit ${recording.title} · Clip`;
+      repairDuration(player);
+      player.src = `/media/${id}.webm`;
+      $('content').hidden = false;
+      setWatermark((await fetch(WATERMARK)).ok);
+      await loadMusic(draft?.music?.id);
+      draftReady = true;
+      startHistory();
+    } catch (err) {
+      showError(err.message);
+    }
+  </script>
+</body>
+</html>

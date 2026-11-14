@@ -1,0 +1,14 @@
+data/
+node_modules/
+*.log
+build.json
+build.err
+build-*.json
+build-*.err
+harden*.json
+harden*.err
+editor.json
+editor.err
+youtube.json
+youtube.err
+.DS_Store

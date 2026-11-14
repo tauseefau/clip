@@ -1,0 +1,1049 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Record · Clip</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="topbar">
+    <a class="brand" href="/">Clip</a>
+    <nav aria-label="Main">
+      <a href="/" aria-current="page">Record</a>
+      <a href="/library">Library</a>
+      <a href="/stitch">Stitch</a>
+    </nav>
+  </div>
+
+  <main class="recorder">
+    <header id="intro">
+      <h1>Record a clip</h1>
+      <p class="muted">Pick what to capture. You get a link to share when you stop.</p>
+    </header>
+
+    <div id="notice" class="notice" role="status" hidden>
+      <div id="noticeText"></div>
+      <button id="retry" class="btn" type="button" hidden>Retry upload</button>
+      <a id="save" class="btn" download="clip.webm" hidden>Save to this computer</a>
+    </div>
+
+    <section id="sources" class="sources" aria-label="Recording source">
+      <button class="source" type="button" data-mode="screen">
+        <span class="source-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4.5" width="18" height="12" rx="2"/>
+            <path d="M8 20h8M12 16.5V20"/>
+          </svg>
+        </span>
+        <span class="source-copy">
+          <span class="source-head"><strong>Screen</strong></span>
+          <span>Screen and microphone</span>
+        </span>
+      </button>
+      <button class="source" type="button" data-mode="both">
+        <span class="source-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="12" rx="2"/>
+            <circle cx="12" cy="10" r="2.2"/>
+            <path d="M8 20h8M12 16v4"/>
+          </svg>
+        </span>
+        <span class="source-copy">
+          <span class="source-head"><strong>Screen + Cam</strong><span class="source-badge">Recommended</span></span>
+          <span>Screen with a camera bubble</span>
+        </span>
+      </button>
+      <button class="source" type="button" data-mode="cam">
+        <span class="source-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2.5" y="6" width="13" height="12" rx="2.5"/>
+            <path d="M15.5 10.5 21 8v8l-5.5-2.5"/>
+          </svg>
+        </span>
+        <span class="source-copy">
+          <span class="source-head"><strong>Cam only</strong></span>
+          <span>Camera and microphone</span>
+        </span>
+      </button>
+    </section>
+
+    <div id="stage" class="stage" hidden>
+      <!-- The canvas (prepended by the script) is the preview; these videos are only draw sources. -->
+      <video id="mainVideo" muted playsinline></video>
+      <div id="bubble" class="bubble" tabindex="0" role="group" aria-label="Camera bubble. Drag, or use the arrow keys, to move it." hidden>
+        <video id="camVideo" muted playsinline></video>
+      </div>
+      <div id="countdown" class="countdown" aria-live="assertive" hidden></div>
+    </div>
+    <p id="annotateHint" class="muted" hidden style="margin-top:8px"></p>
+
+    <section id="controls" class="controls" aria-label="Scene and look" hidden>
+      <div class="control-row" role="group" aria-labelledby="drawLabel">
+        <span id="drawLabel" class="control-label">Draw</span>
+        <button class="btn" type="button" data-tool="highlight" aria-pressed="false" aria-keyshortcuts="H">Highlight</button>
+        <button class="btn" type="button" data-tool="arrow" aria-pressed="false" aria-keyshortcuts="R">Arrow</button>
+        <button class="btn" type="button" data-tool="pen" aria-pressed="false" aria-keyshortcuts="P">Pen</button>
+        <button class="btn" type="button" data-tool="text" aria-pressed="false" aria-keyshortcuts="T">Text</button>
+        <button class="btn" type="button" data-tool="note" aria-pressed="false" aria-keyshortcuts="N">Comment</button>
+        <button class="btn" type="button" data-tool="spot" aria-pressed="false" aria-keyshortcuts="O">Spotlight</button>
+        <button class="btn" type="button" data-tool="step" aria-pressed="false" aria-keyshortcuts="M">Step</button>
+        <button id="zoomBtn" class="btn" type="button" aria-pressed="false" aria-keyshortcuts="Z">Zoom</button>
+        <button id="undoBtn" class="btn" type="button" aria-keyshortcuts="Control+Z">Undo</button>
+        <button id="clearBtn" class="btn" type="button" aria-keyshortcuts="C">Clear</button>
+        <div class="swatches">
+          <button class="swatch" type="button" data-ink="#ff3b30" style="--swatch:#ff3b30" aria-label="Red ink" aria-pressed="true"></button>
+          <button class="swatch" type="button" data-ink="#ffd60a" style="--swatch:#ffd60a" aria-label="Yellow ink" aria-pressed="false"></button>
+          <button class="swatch" type="button" data-ink="#30d158" style="--swatch:#30d158" aria-label="Green ink" aria-pressed="false"></button>
+          <button class="swatch" type="button" data-ink="#0a84ff" style="--swatch:#0a84ff" aria-label="Blue ink" aria-pressed="false"></button>
+          <button class="swatch" type="button" data-ink="#ffffff" style="--swatch:#ffffff" aria-label="White ink" aria-pressed="false"></button>
+        </div>
+        <label class="check"><input id="fadeMarks" type="checkbox"> Fade marks after 5 s</label>
+      </div>
+      <div class="control-row" role="group" aria-labelledby="deviceLabel">
+        <span id="deviceLabel" class="control-label">Devices</span>
+        <select id="micSelect" class="title-text" aria-label="Microphone"></select>
+        <select id="camSelect" class="title-text" aria-label="Camera"></select>
+      </div>
+      <div class="control-row" role="group" aria-labelledby="sceneLabel">
+        <span id="sceneLabel" class="control-label">Scene</span>
+        <button class="btn" type="button" data-scene="screen" aria-pressed="false">Screen</button>
+        <button class="btn" type="button" data-scene="both" aria-pressed="false">Screen + Cam</button>
+        <button class="btn" type="button" data-scene="cam" aria-pressed="false">Cam</button>
+        <button class="btn" type="button" data-scene="title" aria-pressed="false">Title</button>
+        <input id="titleText" class="title-text" value="Clip" maxlength="60" aria-label="Title card text">
+      </div>
+      <div class="control-row" role="group" aria-labelledby="bgLabel">
+        <span id="bgLabel" class="control-label">Background</span>
+        <div class="swatches">
+          <button class="swatch" type="button" data-bg="#0b0b0c" style="--swatch:#0b0b0c" aria-label="Near black" aria-pressed="true"></button>
+          <button class="swatch" type="button" data-bg="#1f2937" style="--swatch:#1f2937" aria-label="Slate" aria-pressed="false"></button>
+          <button class="swatch" type="button" data-bg="#1e3a8a" style="--swatch:#1e3a8a" aria-label="Navy" aria-pressed="false"></button>
+          <button class="swatch" type="button" data-bg="#7f1d1d" style="--swatch:#7f1d1d" aria-label="Maroon" aria-pressed="false"></button>
+          <button class="swatch" type="button" data-bg="#14532d" style="--swatch:#14532d" aria-label="Forest" aria-pressed="false"></button>
+          <button class="swatch" type="button" data-bg="#6d28d9" style="--swatch:#6d28d9" aria-label="Violet" aria-pressed="false"></button>
+          <input id="bgColor" class="color-input" type="color" value="#0b0b0c" aria-label="Custom background colour">
+        </div>
+      </div>
+      <div class="control-row" role="group" aria-labelledby="frameLabel">
+        <span id="frameLabel" class="control-label">Camera frame</span>
+        <div class="swatches">
+          <button class="swatch none" type="button" data-frame="" aria-label="Transparent" aria-pressed="true"></button>
+          <button class="swatch" type="button" data-frame="#ffffff" style="--swatch:#ffffff" aria-label="White" aria-pressed="false"></button>
+          <button class="swatch" type="button" data-frame="#ff0033" style="--swatch:#ff0033" aria-label="Red" aria-pressed="false"></button>
+          <button class="swatch" type="button" data-frame="#2f6bff" style="--swatch:#2f6bff" aria-label="Blue" aria-pressed="false"></button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="bar" class="bar" role="toolbar" aria-label="Recorder" hidden>
+    <div id="timer" class="timer" role="timer" hidden><span class="dot"></span><span id="time">00:00</span></div>
+    <div class="meter" role="img" aria-label="Microphone level"><div id="level"></div></div>
+    <div id="icons" class="icon-row" role="group" aria-labelledby="iconsLabel" hidden>
+      <span id="iconsLabel" class="icon-label">Icons — live only (cannot be undone; they are in the take)</span>
+      <button class="btn" type="button" data-icon="subscribe" aria-pressed="false" aria-keyshortcuts="S">Subscribe</button>
+      <button class="btn" type="button" data-icon="like" aria-pressed="false" aria-keyshortcuts="L">Like</button>
+      <button class="btn" type="button" data-icon="bell" aria-pressed="false" aria-keyshortcuts="B">Bell</button>
+      <button class="btn" type="button" data-icon="arrow" aria-pressed="false" aria-keyshortcuts="A">Arrow</button>
+    </div>
+    <label id="qualityField" class="quality">Quality
+      <select id="quality">
+        <option value="1080" selected>1080p</option>
+        <option value="720">720p</option>
+        <option value="source">Source</option>
+      </select>
+    </label>
+    <label id="countdownField" class="quality" style="white-space:nowrap"><input id="countdownOn" type="checkbox" checked> Countdown</label>
+    <button id="startBtn" class="btn primary" type="button">Start recording</button>
+    <button id="pauseBtn" class="btn" type="button" hidden>Pause</button>
+    <button id="stopBtn" class="btn primary" type="button" hidden>Stop</button>
+    <button id="cancelBtn" class="btn" type="button">Cancel</button>
+  </div>
+
+  <script src="/auth.js"></script>
+  <script type="module">
+    const $ = (id) => document.getElementById(id);
+    const BUBBLE = 180;
+    const INSET = 16;
+    const FPS = 30;
+    const QUALITY = {
+      1080: { height: 1080, bitrate: 14_000_000 },
+      720: { height: 720, bitrate: 8_000_000 },
+      source: { height: Infinity, bitrate: 16_000_000 },
+    };
+
+    const ICON_MS = 900;
+    const ICON_KEYS = { s: 'subscribe', l: 'like', b: 'bell', a: 'arrow' };
+
+    // Live annotations, baked into the take. Coordinates are content (unzoomed) canvas pixels.
+    const TOOL_KEYS = { h: 'highlight', r: 'arrow', p: 'pen', t: 'text', n: 'note', o: 'spot', m: 'step' };
+    const FADE_MS = 5000;
+    const VIDEO = {
+      width: { ideal: 1920 },  // without this Chrome returns 640×480 and Cam only records 480p
+      height: { ideal: 1080 },
+      frameRate: { ideal: 30, max: 30 },
+    };
+    const DEVICE_KEY = 'clip.devices';
+    const HINTS = {
+      highlight: 'Highlight: drag to mark a region.',
+      arrow: 'Arrow: drag from start to tip.',
+      pen: 'Pen: drag to draw freehand.',
+      text: 'Text: click where it goes, then type. Enter adds a line, Esc finishes.',
+      note: 'Comment: click where it goes, then type. Enter adds a line, Esc finishes.',
+      spot: 'Spotlight: drag over the area to keep lit; the rest dims.',
+      step: 'Step: click to drop the next numbered marker.',
+    };
+    const annotations = [];
+    let annotateMode = null;
+    let drawing = null;
+    let typing = null; // the text/note annotation receiving keystrokes
+    let inkColor = '#ff3b30';
+    let nextStep = 1;
+    // Live zoom: cur eases toward target every frame; fx/fy (0..1) is where the view sits, following the mouse.
+    const zoom = { target: 1, cur: 1, fx: 0.5, fy: 0.5 };
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high'; // 4K screen → 1080p canvas must not alias text
+    $('stage').prepend(canvas);
+
+    canvas.addEventListener('mousedown', (event) => {
+      if (!annotateMode) return;
+      const c = canvasCoords(event);
+      endTyping();
+      if (annotateMode === 'text' || annotateMode === 'note') {
+        typing = { type: annotateMode, x: c.x, y: c.y, text: '', color: inkColor, at: performance.now() };
+        annotations.push(typing);
+        document.activeElement?.blur(); // keystrokes must reach the document handler, not a focused button
+      } else if (annotateMode === 'step') {
+        annotations.push({ type: 'step', x: c.x, y: c.y, n: nextStep++, color: inkColor, at: performance.now() });
+      } else {
+        drawing = { type: annotateMode, x1: c.x, y1: c.y, x2: c.x, y2: c.y, color: inkColor, pts: [[c.x, c.y]] };
+      }
+      event.preventDefault();
+    });
+    canvas.addEventListener('mousemove', (event) => {
+      // The zoomed view follows the mouse, but holds still while a tool is active so strokes don't slide.
+      if (!annotateMode || zoom.target === 1) {
+        const rect = canvas.getBoundingClientRect();
+        zoom.fx = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+        zoom.fy = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+      }
+      if (!drawing) return;
+      const c = canvasCoords(event);
+      drawing.x2 = c.x;
+      drawing.y2 = c.y;
+      if (drawing.type === 'pen') drawing.pts.push([c.x, c.y]);
+    });
+    window.addEventListener('mouseup', () => {
+      if (!drawing) return;
+      const moved = drawing.type === 'pen'
+        ? drawing.pts.length > 2
+        : Math.hypot(drawing.x2 - drawing.x1, drawing.y2 - drawing.y1) > 4;
+      if (moved) annotations.push({ ...drawing, at: performance.now() });
+      drawing = null;
+    });
+    canvas.addEventListener('wheel', (event) => {
+      if (zoom.target === 1) return;
+      zoom.target = Math.min(5, Math.max(1.25, zoom.target * (event.deltaY < 0 ? 1.15 : 1 / 1.15)));
+      event.preventDefault();
+    }, { passive: false });
+    const bubblePos = { fx: 1, fy: 1 }; // 0..1 across the area the bubble can occupy
+    let session = null;
+    let pendingUpload = null;
+
+    function showNotice(message, isError = false) {
+      $('notice').hidden = false;
+      $('notice').classList.toggle('error', isError);
+      $('notice').setAttribute('role', isError ? 'alert' : 'status');
+      $('noticeText').textContent = message;
+    }
+
+    function hideNotice() {
+      $('notice').hidden = true;
+      $('retry').hidden = true;
+      $('save').hidden = true;
+    }
+
+    function explain(err) {
+      if (err.name === 'NotAllowedError') return 'Permission denied. Allow screen, camera and microphone access in your browser, then try again.';
+      if (err.name === 'NotFoundError') return 'No camera or microphone was found. Connect one and try again.';
+      if (err.name === 'NotReadableError') return 'Your camera or microphone is in use by another app or could not be started.';
+      return `Could not start recording: ${err.message}`;
+    }
+
+    const mm = (value) => String(Math.floor(value)).padStart(2, '0');
+    const formatTime = (ms) => `${mm(ms / 60000)}:${mm((ms / 1000) % 60)}`;
+
+    function elapsed() {
+      const { banked, resumedAt } = session;
+      return banked + (resumedAt === null ? 0 : performance.now() - resumedAt);
+    }
+
+    function setView(view) {
+      const idle = view === 'idle';
+      const recording = view === 'recording';
+      $('intro').hidden = !idle;
+      $('sources').hidden = !idle;
+      $('stage').hidden = idle;
+      $('controls').hidden = idle;
+      $('bar').hidden = idle;
+      $('icons').hidden = !recording;
+      $('timer').hidden = !recording;
+      $('pauseBtn').hidden = !recording;
+      $('stopBtn').hidden = !recording;
+      $('startBtn').hidden = view !== 'setup';
+      $('qualityField').hidden = view !== 'setup';
+      $('countdownField').hidden = view !== 'setup';
+    }
+
+    function drawCamera(video) {
+      const side = Math.min(video.videoWidth, video.videoHeight);
+      const sx = (video.videoWidth - side) / 2;
+      const sy = (video.videoHeight - side) / 2;
+      const x = INSET + bubblePos.fx * (canvas.width - BUBBLE - 2 * INSET);
+      const y = INSET + bubblePos.fy * (canvas.height - BUBBLE - 2 * INSET);
+      const { camFrame } = session;
+      if (camFrame) {
+        ctx.fillStyle = camFrame.color;
+        ctx.beginPath();
+        ctx.roundRect(x, y, BUBBLE, BUBBLE, BUBBLE * 0.18);
+        ctx.fill();
+      }
+      const r = BUBBLE / 2 - (camFrame ? BUBBLE * 0.08 : 0); // camera sits inset inside the frame
+      const cx = x + BUBBLE / 2;
+      const cy = y + BUBBLE / 2;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(video, sx, sy, side, side, cx - r, cy - r, 2 * r, 2 * r);
+      ctx.restore();
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, r - 1, 0, Math.PI * 2);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#fff';
+      ctx.stroke();
+    }
+
+    // Crop the source to the canvas aspect and fill the frame: covers, never stretches.
+    function coverFit(video) {
+      const { videoWidth: vw, videoHeight: vh } = video;
+      if (!vw || !vh) return;
+      const scale = Math.min(vw / canvas.width, vh / canvas.height);
+      const sw = canvas.width * scale;
+      const sh = canvas.height * scale;
+      ctx.drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, canvas.width, canvas.height);
+    }
+
+    function drawTitle() {
+      ctx.fillStyle = session.bg;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold ${Math.round(canvas.height * 0.07)}px system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(session.titleText, canvas.width / 2, canvas.height / 2, canvas.width * 0.9);
+    }
+
+    function disc(r, color) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Drawn around the origin; r is a canvas-pixel radius.
+    const ICON_SHAPES = {
+      subscribe(r) {
+        ctx.fillStyle = '#ff0033';
+        ctx.beginPath();
+        ctx.roundRect(-r * 2.6, -r * 0.8, r * 5.2, r * 1.6, r * 0.8);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${r * 0.75}px system-ui, sans-serif`;
+        ctx.fillText('SUBSCRIBE', 0, 0, r * 4.6);
+      },
+      like(r) {
+        disc(r, '#2f6bff');
+        ctx.fillStyle = '#fff';
+        ctx.font = `${r * 1.1}px sans-serif`;
+        ctx.fillText('♥', 0, r * 0.05);
+      },
+      bell(r) {
+        disc(r, '#ffcc00');
+        ctx.fillStyle = '#111';
+        ctx.beginPath();
+        ctx.arc(0, -r * 0.1, r * 0.42, Math.PI, 0);
+        ctx.lineTo(r * 0.55, r * 0.38);
+        ctx.lineTo(-r * 0.55, r * 0.38);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(0, r * 0.5, r * 0.13, 0, Math.PI * 2);
+        ctx.fill();
+      },
+      arrow(r) {
+        disc(r, '#fff');
+        ctx.fillStyle = '#111';
+        ctx.beginPath();
+        for (const [px, py] of [[-0.5, -0.18], [0.05, -0.18], [0.05, -0.45], [0.55, 0], [0.05, 0.45], [0.05, 0.18], [-0.5, 0.18]]) {
+          ctx.lineTo(px * r, py * r);
+        }
+        ctx.closePath();
+        ctx.fill();
+      },
+    };
+
+    function drawIcon(icon) {
+      // elapsed(), not wall time: pause freezes the take, so it must freeze the animation too.
+      const p = (elapsed() - icon.at) / ICON_MS;
+      if (p > 1) return;
+      const r = canvas.width * 0.035;
+      const t = Math.min(p / 0.25, 1) - 1;
+      const scale = 1 + 2.70158 * t ** 3 + 1.70158 * t ** 2; // ease-out-back pop
+      const halfWidth = icon.kind === 'subscribe' ? r * 2.6 : r;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(p / 0.15, 1, (1 - p) / 0.25));
+      // Bottom-left, inside a 5% safe area (YouTube's progress bar covers the bottom edge).
+      ctx.translate(
+        canvas.width * 0.05 + halfWidth * 1.15,
+        canvas.height * 0.95 - r * 1.15 + Math.sin(p * Math.PI * 4) * r * 0.08,
+      );
+      ctx.scale(scale, scale);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ICON_SHAPES[icon.kind](r);
+      ctx.restore();
+    }
+
+    function drawIcons() {
+      for (const icon of session.icons) drawIcon(icon);
+    }
+
+    function endTyping() {
+      if (typing && !typing.text.trim()) annotations.splice(annotations.indexOf(typing), 1);
+      if (typing) typing.at = performance.now(); // the fade clock starts when the typing stops
+      typing = null;
+    }
+
+    function setAnnotateMode(mode) {
+      endTyping();
+      annotateMode = (annotateMode === mode) ? null : mode;
+      canvas.style.cursor = !annotateMode ? '' : (annotateMode === 'text' || annotateMode === 'note') ? 'text' : 'crosshair';
+      const handle = $('handle');
+      if (handle) handle.style.pointerEvents = annotateMode ? 'none' : '';
+      $('annotateHint').hidden = !annotateMode;
+      $('annotateHint').textContent = annotateMode ? `${HINTS[annotateMode]} Ctrl+Z undo, C clear, Esc exit.` : '';
+      for (const button of document.querySelectorAll('[data-tool]')) {
+        button.setAttribute('aria-pressed', String(button.dataset.tool === annotateMode));
+      }
+    }
+
+    function setZoom(on) {
+      zoom.target = on ? 2 : 1;
+      $('zoomBtn').setAttribute('aria-pressed', String(on));
+    }
+
+    function zoomOffset() {
+      return { tx: -zoom.fx * canvas.width * (zoom.cur - 1), ty: -zoom.fy * canvas.height * (zoom.cur - 1) };
+    }
+
+    // Mouse position in content pixels: what is under the cursor, whatever the zoom.
+    function canvasCoords(event) {
+      const rect = canvas.getBoundingClientRect();
+      const { tx, ty } = zoomOffset();
+      return { x: ((event.clientX - rect.left) * (canvas.width / rect.width) - tx) / zoom.cur,
+               y: ((event.clientY - rect.top) * (canvas.height / rect.height) - ty) / zoom.cur };
+    }
+
+    function drawArrowShape(x1, y1, x2, y2, color) {
+      const head = Math.max(12, canvas.width * 0.018);
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = Math.max(3, canvas.width * 0.004);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x2, y2);
+      ctx.lineTo(x2 - head * Math.cos(angle - Math.PI / 6), y2 - head * Math.sin(angle - Math.PI / 6));
+      ctx.lineTo(x2 - head * Math.cos(angle + Math.PI / 6), y2 - head * Math.sin(angle + Math.PI / 6));
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    function drawTextNote(a) {
+      const size = Math.round(canvas.height * 0.04);
+      const lineHeight = size * 1.25;
+      const lines = a.text.split('\n');
+      const note = a.type === 'note';
+      ctx.font = `bold ${size}px system-ui, sans-serif`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.lineJoin = 'round';
+      if (note) {
+        const pad = size * 0.5;
+        const width = Math.max(size, ...lines.map((line) => ctx.measureText(line).width));
+        ctx.beginPath();
+        ctx.roundRect(a.x - pad, a.y - pad, width + 2 * pad, (lines.length - 1) * lineHeight + size + 2 * pad, size * 0.3);
+        ctx.fillStyle = 'rgb(17 17 17 / 88%)';
+        ctx.fill();
+        ctx.lineWidth = Math.max(2, size * 0.08);
+        ctx.strokeStyle = a.color;
+        ctx.stroke();
+      }
+      lines.forEach((line, i) => {
+        if (!note) { // dark outline keeps coloured text readable on any screen content
+          ctx.lineWidth = size * 0.14;
+          ctx.strokeStyle = 'rgb(0 0 0 / 75%)';
+          ctx.strokeText(line, a.x, a.y + i * lineHeight);
+        }
+        ctx.fillStyle = note ? '#fff' : a.color;
+        ctx.fillText(line, a.x, a.y + i * lineHeight);
+      });
+      if (a === typing && performance.now() % 1000 < 500) { // caret
+        ctx.fillStyle = note ? '#fff' : a.color;
+        ctx.fillRect(a.x + ctx.measureText(lines.at(-1)).width + 2, a.y + (lines.length - 1) * lineHeight, size * 0.08, size);
+      }
+    }
+
+    function drawAnnotation(a, live) {
+      if (a.type === 'highlight') {
+        const x = Math.min(a.x1, a.x2), y = Math.min(a.y1, a.y2);
+        const w = Math.abs(a.x2 - a.x1), h = Math.abs(a.y2 - a.y1);
+        ctx.fillStyle = 'rgba(255, 230, 0, 0.32)';
+        if (!live) ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = 'rgba(255, 200, 0, 0.95)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash(live ? [6, 4] : []);
+        ctx.strokeRect(x, y, w, h);
+        ctx.setLineDash([]);
+      } else if (a.type === 'arrow') {
+        drawArrowShape(a.x1, a.y1, a.x2, a.y2, a.color);
+      } else if (a.type === 'pen') {
+        ctx.strokeStyle = a.color;
+        ctx.lineWidth = Math.max(3, canvas.width * 0.004);
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        for (const [x, y] of a.pts) ctx.lineTo(x, y);
+        ctx.stroke();
+      } else if (a.type === 'step') {
+        const r = canvas.height * 0.03;
+        ctx.beginPath();
+        ctx.arc(a.x, a.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = a.color;
+        ctx.fill();
+        ctx.lineWidth = r * 0.14;
+        ctx.strokeStyle = '#fff';
+        ctx.stroke();
+        ctx.fillStyle = ['#ffffff', '#ffd60a'].includes(a.color) ? '#111' : '#fff';
+        ctx.font = `bold ${Math.round(r * 1.2)}px system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(a.n, a.x, a.y + r * 0.06);
+      } else if (a.type !== 'spot') { // spotlights are drawn together, by drawSpotlight
+        drawTextNote(a);
+      }
+    }
+
+    function undoMark() {
+      endTyping();
+      const mark = annotations.pop();
+      if (mark?.type === 'step') nextStep = mark.n;
+    }
+
+    function clearMarks() {
+      endTyping();
+      annotations.length = 0;
+      nextStep = 1;
+    }
+
+    // 1 while a mark is fresh, easing to 0 over its last half second; marks never fade unless the box is ticked.
+    function markAlpha(a, now) {
+      if (!$('fadeMarks').checked || a === typing) return 1;
+      return Math.min(1, Math.max(0, (FADE_MS - (now - a.at)) / 500));
+    }
+
+    // Everything outside the spotlit areas dims; even-odd fill punches the holes.
+    function drawSpotlight(spots, alpha) {
+      if (!spots.length) return;
+      ctx.beginPath();
+      ctx.rect(0, 0, canvas.width, canvas.height);
+      for (const a of spots) {
+        ctx.roundRect(Math.min(a.x1, a.x2), Math.min(a.y1, a.y2), Math.abs(a.x2 - a.x1), Math.abs(a.y2 - a.y1), canvas.height * 0.012);
+      }
+      ctx.fillStyle = `rgb(0 0 0 / ${0.62 * alpha})`;
+      ctx.fill('evenodd');
+    }
+
+    function drawAnnotations() {
+      const now = performance.now();
+      for (let i = annotations.length - 1; i >= 0; i--) {
+        if (markAlpha(annotations[i], now) === 0) annotations.splice(i, 1);
+      }
+      const marks = drawing ? [...annotations, drawing] : annotations;
+      const spots = marks.filter((a) => a.type === 'spot');
+      drawSpotlight(spots, Math.max(0, ...spots.map((a) => (a === drawing ? 1 : markAlpha(a, now)))));
+      for (const a of marks) {
+        ctx.globalAlpha = a === drawing ? 1 : markAlpha(a, now);
+        drawAnnotation(a, a === drawing);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function drawFrame() {
+      zoom.cur += (zoom.target - zoom.cur) * 0.25;
+      if (Math.abs(zoom.target - zoom.cur) < 0.002) zoom.cur = zoom.target;
+      const { tx, ty } = zoomOffset();
+      ctx.fillStyle = session.bg;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // Scene and annotations zoom together, so a mark stays on what it marks. Drawing the video
+      // through the transform samples the full-resolution source: a 4K share stays sharp at 2x.
+      ctx.save();
+      ctx.setTransform(zoom.cur, 0, 0, zoom.cur, tx, ty);
+      if (session.scene === 'screen' || session.scene === 'both') coverFit($('mainVideo'));
+      if (session.scene === 'cam') coverFit($('camVideo'));
+      if (session.scene === 'title') drawTitle();
+      else drawAnnotations(); // marks belong to the screen or camera, not the title card
+      ctx.restore();
+      if (session.scene === 'both') drawCamera($('camVideo'));
+      drawIcons();
+    }
+
+    function sizeCanvas() {
+      const { height } = QUALITY[$('quality').value];
+      // The screen elects the size when present, so a 720p webcam never shrinks a 4K share.
+      const source = session.hasScreen ? $('mainVideo') : $('camVideo');
+      // Never upscales. Even sizes because VP9 and later transcodes need them.
+      canvas.height = Math.round(Math.min(height, source.videoHeight) / 2) * 2;
+      canvas.width = Math.round(source.videoWidth * canvas.height / source.videoHeight / 2) * 2;
+      $('stage').style.setProperty('--ar', canvas.width / canvas.height);
+      placeHandle();
+    }
+
+    function updateScenes() {
+      const { hasScreen, hasCam } = session;
+      const available = { screen: hasScreen, both: hasScreen && hasCam, cam: hasCam, title: true };
+      for (const button of document.querySelectorAll('[data-scene]')) {
+        button.disabled = !available[button.dataset.scene];
+        button.setAttribute('aria-pressed', String(button.dataset.scene === session.scene));
+      }
+      $('bubble').hidden = session.scene !== 'both';
+    }
+
+    function setScene(scene) {
+      session.scene = scene;
+      updateScenes(); // never touches the MediaRecorder; the next frame just draws differently
+    }
+
+    function press(selector, active) {
+      for (const button of document.querySelectorAll(selector)) button.setAttribute('aria-pressed', String(button === active));
+    }
+
+    function fireIcon(kind) {
+      if (session?.recorder?.state !== 'recording') return;
+      session.icons.push({ kind, at: elapsed() });
+      const button = document.querySelector(`[data-icon="${kind}"]`);
+      button.setAttribute('aria-pressed', 'true');
+      setTimeout(() => button.setAttribute('aria-pressed', 'false'), ICON_MS);
+    }
+
+    function updateMeter() {
+      const { analyser, samples } = session;
+      analyser.getByteTimeDomainData(samples);
+      const peak = samples.reduce((max, v) => Math.max(max, Math.abs(v - 128)), 0) / 128;
+      $('level').style.transform = `scaleX(${Math.min(peak * 2, 1)})`;
+    }
+
+    function tick() {
+      if (!session) return; // a message can still be queued after the worker is terminated
+      updateMeter();
+      drawFrame(); // also in setup, so the preview is the canvas before recording starts
+      if (session.recorder) $('time').textContent = formatTime(elapsed());
+    }
+
+    function teardown() {
+      for (const stream of session.streams) for (const track of stream.getTracks()) { track.onended = null; track.stop(); }
+      session.ticker.terminate();
+      session.audio.close();
+      $('mainVideo').srcObject = null;
+      $('camVideo').srcObject = null;
+      setAnnotateMode(null);
+      clearMarks();
+      setZoom(false);
+      session = null;
+      setView('idle');
+    }
+
+    async function choose(mode) {
+      hideNotice();
+      pendingUpload = null;
+      const wantScreen = mode !== 'cam';
+      const media = navigator.mediaDevices;
+
+      if (!media?.getUserMedia) {
+        return showNotice('This browser cannot capture media here. Open Clip over https or on localhost in a desktop browser.', true);
+      }
+      if (wantScreen && !media.getDisplayMedia) {
+        return showNotice('This browser does not support screen capture. Use desktop Chrome, Edge or Firefox, or choose Cam only.', true);
+      }
+      if (typeof MediaRecorder === 'undefined') return showNotice('This browser does not support MediaRecorder.', true);
+
+      const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus'].find((t) => MediaRecorder.isTypeSupported(t));
+      if (!mimeType) return showNotice('This browser cannot record WebM video. Use desktop Chrome, Edge or Firefox.', true);
+
+      const streams = [];
+      try {
+        const screen = wantScreen ? await media.getDisplayMedia({ video: true, audio: true }) : null; // audio: the picker's "share audio" box
+        if (screen) streams.push(screen);
+        // Always ask for the camera, so any take can switch scenes later without a prompt mid-recording.
+        let user;
+        let camNotice = null;
+        try {
+          user = await media.getUserMedia(userConstraints(true));
+        } catch (err) {
+          if (!screen) throw err;
+          user = await media.getUserMedia(userConstraints(false)); // the mic is still required
+          camNotice = `Camera unavailable (${err.name}). Recording the screen only.`;
+        }
+        streams.push(user);
+        const camTrack = user.getVideoTracks()[0];
+
+        if (screen) {
+          $('mainVideo').srcObject = screen;
+          await $('mainVideo').play();
+        }
+        if (camTrack) {
+          $('camVideo').srcObject = user;
+          await $('camVideo').play();
+        }
+
+        const audio = new AudioContext();
+        const analyser = audio.createAnalyser();
+        analyser.fftSize = 256;
+        // The take records this mix: the mic plus, when it was shared, the tab's or system's sound.
+        const mix = audio.createMediaStreamDestination();
+        const micNode = audio.createMediaStreamSource(user);
+        micNode.connect(analyser);
+        micNode.connect(mix);
+        if (screen?.getAudioTracks().length) audio.createMediaStreamSource(screen).connect(mix);
+
+        // Timers and rAF stall once the user switches to the tab being shared; a worker's do not.
+        const ticker = new Worker(URL.createObjectURL(new Blob(
+          [`setInterval(() => postMessage(0), ${1000 / FPS})`], { type: 'text/javascript' })));
+        ticker.onmessage = tick;
+
+        session = {
+          streams, user, audio, analyser, mix, micNode, ticker, mimeType,
+          samples: new Uint8Array(analyser.fftSize),
+          recorder: null, chunks: [], banked: 0, resumedAt: null,
+          hasScreen: Boolean(screen), hasCam: Boolean(camTrack),
+          scene: camTrack ? mode : 'screen',
+          icons: [], bg: '#0b0b0c', camFrame: null, titleText: $('titleText').value,
+        };
+        press('[data-bg]', document.querySelector('[data-bg]'));
+        press('[data-frame]', document.querySelector('[data-frame]'));
+        $('bgColor').value = session.bg;
+
+        const end = () => (session.recorder ? stop() : cancel());
+        // The browser's own "Stop sharing" button ends the track without touching our UI.
+        // Losing one source switches scene; only losing both ends the take.
+        if (screen) screen.getVideoTracks()[0].onended = () => {
+          session.hasScreen = false;
+          if (!session.hasCam) return end();
+          if (session.scene !== 'title') session.scene = 'cam';
+          updateScenes();
+          showNotice('Screen sharing stopped — switched to camera.');
+        };
+        session.camEnded = () => {
+          session.hasCam = false;
+          if (!session.hasScreen) return end();
+          if (session.scene === 'both' || session.scene === 'cam') session.scene = 'screen';
+          updateScenes();
+          showNotice('Camera stopped — switched to screen.');
+        };
+        if (camTrack) camTrack.onended = session.camEnded;
+
+        sizeCanvas();
+        updateScenes();
+        if (camNotice) showNotice(camNotice);
+        setView('setup');
+        listDevices();
+        $('startBtn').focus();
+      } catch (err) {
+        for (const stream of streams) for (const track of stream.getTracks()) track.stop();
+        showNotice(explain(err), true);
+      }
+    }
+
+    // Saved picks are only a preference (ideal), so an unplugged device falls back to the default.
+    function userConstraints(withVideo) {
+      const saved = JSON.parse(localStorage.getItem(DEVICE_KEY) ?? '{}');
+      return {
+        audio: saved.mic ? { deviceId: { ideal: saved.mic } } : true,
+        video: withVideo ? { ...VIDEO, ...(saved.cam && { deviceId: { ideal: saved.cam } }) } : false,
+      };
+    }
+
+    async function listDevices() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      for (const [select, kind, track] of [
+        [$('micSelect'), 'audioinput', session.user.getAudioTracks()[0]],
+        [$('camSelect'), 'videoinput', session.user.getVideoTracks()[0]],
+      ]) {
+        const options = devices.filter((d) => d.kind === kind).map((d, i) => new Option(d.label || `${kind} ${i + 1}`, d.deviceId));
+        select.replaceChildren(...options);
+        select.value = track?.getSettings().deviceId ?? '';
+        select.disabled = !track;
+      }
+    }
+
+    // Works mid-take too: the recorder holds the mix and the canvas, not these tracks.
+    async function swapDevices() {
+      const hadCam = session.user.getVideoTracks().length > 0;
+      const mic = $('micSelect').value;
+      const cam = $('camSelect').value;
+      let user;
+      try {
+        user = await navigator.mediaDevices.getUserMedia({
+          audio: { deviceId: { exact: mic } },
+          video: hadCam ? { ...VIDEO, deviceId: { exact: cam } } : false,
+        });
+      } catch (err) {
+        showNotice(explain(err), true);
+        if (session) listDevices(); // put the selects back on what is really in use
+        return;
+      }
+      if (!session) return user.getTracks().forEach((track) => track.stop());
+      localStorage.setItem(DEVICE_KEY, JSON.stringify({ mic, cam }));
+      const old = session.user;
+      for (const track of old.getTracks()) { track.onended = null; track.stop(); }
+      session.streams[session.streams.indexOf(old)] = user;
+      session.user = user;
+      session.micNode.disconnect();
+      session.micNode = session.audio.createMediaStreamSource(user);
+      session.micNode.connect(session.analyser);
+      session.micNode.connect(session.mix);
+      if (hadCam) {
+        $('camVideo').srcObject = user;
+        await $('camVideo').play();
+        user.getVideoTracks()[0].onended = session.camEnded;
+      }
+    }
+
+    async function countdownThenStart() {
+      $('startBtn').disabled = true;
+      for (let n = $('countdownOn').checked ? 3 : 0; n > 0 && session; n--) {
+        $('countdown').textContent = n;
+        $('countdown').hidden = false;
+        await new Promise((done) => setTimeout(done, 1000));
+      }
+      $('countdown').hidden = true;
+      $('startBtn').disabled = false;
+      if (session && !session.recorder) start(); // Cancel during the count ends the session
+    }
+
+    function start() {
+      const { bitrate } = QUALITY[$('quality').value];
+      sizeCanvas(); // fixed from here for the life of the take: a captureStream track cannot be resized
+      drawFrame();
+      const tracks = [...canvas.captureStream(FPS).getVideoTracks(), ...session.mix.stream.getAudioTracks()];
+      const recorder = new MediaRecorder(new MediaStream(tracks), { mimeType: session.mimeType, videoBitsPerSecond: bitrate });
+      const { chunks } = session; // the final chunk can arrive after cancel clears the session
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.onerror = (event) => {
+        showNotice(`Recording failed: ${event.error?.message ?? 'unknown error'}`, true);
+        cancel();
+      };
+      recorder.start(1000);
+      session.recorder = recorder;
+      session.resumedAt = performance.now();
+      $('pauseBtn').textContent = 'Pause';
+      $('bar').classList.remove('paused');
+      $('time').textContent = '00:00';
+      setView('recording');
+      $('stopBtn').focus();
+    }
+
+    function togglePause() {
+      const { recorder } = session;
+      if (recorder.state === 'recording') {
+        recorder.pause();
+        session.banked = elapsed();
+        session.resumedAt = null;
+      } else {
+        recorder.resume();
+        session.resumedAt = performance.now();
+      }
+      const paused = recorder.state === 'paused';
+      $('pauseBtn').textContent = paused ? 'Resume' : 'Pause';
+      $('bar').classList.toggle('paused', paused);
+    }
+
+    function stop() {
+      const { recorder, chunks, mimeType } = session;
+      if (recorder.state === 'inactive') return;
+      const durationMs = Math.round(elapsed());
+      recorder.onstop = () => {
+        pendingUpload = { blob: new Blob(chunks, { type: mimeType.split(';')[0] }), durationMs };
+        teardown();
+        upload();
+      };
+      recorder.stop();
+    }
+
+    function cancel() {
+      if (session.recorder && session.recorder.state !== 'inactive') {
+        session.recorder.onstop = null;
+        session.recorder.stop();
+      }
+      teardown();
+    }
+
+    async function upload() {
+      const { blob, durationMs } = pendingUpload;
+      $('retry').hidden = true;
+      $('save').hidden = true;
+      showNotice('Uploading your recording…');
+      $('sources').hidden = true;
+      try {
+        const response = await fetch('/api/recordings', {
+          method: 'POST',
+          headers: { 'x-title': '', 'x-duration-ms': String(durationMs), 'content-type': 'video/webm' },
+          body: blob,
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? `Server returned ${response.status}`);
+        location.href = '/watch/' + result.id;
+      } catch (err) {
+        // The blob only exists in this tab, so a failed upload must never lose it.
+        showNotice(`Upload failed: ${err.message}. Your recording is still here.`, true);
+        $('retry').hidden = false;
+        $('save').href = URL.createObjectURL(blob);
+        $('save').hidden = false;
+        $('sources').hidden = false;
+      }
+    }
+
+    function moveBubble(fx, fy) {
+      bubblePos.fx = Math.min(Math.max(fx, 0), 1);
+      bubblePos.fy = Math.min(Math.max(fy, 0), 1);
+      placeHandle();
+    }
+
+    // The handle is an invisible box over the canvas-drawn bubble, in % of the canvas.
+    function placeHandle() {
+      const { width: w, height: h } = canvas;
+      Object.assign($('bubble').style, {
+        left: `${(INSET + bubblePos.fx * (w - BUBBLE - 2 * INSET)) / w * 100}%`,
+        top: `${(INSET + bubblePos.fy * (h - BUBBLE - 2 * INSET)) / h * 100}%`,
+        width: `${BUBBLE / w * 100}%`,
+        height: `${BUBBLE / h * 100}%`,
+      });
+    }
+
+    const bubble = $('bubble');
+    bubble.addEventListener('pointerdown', (event) => {
+      const box = bubble.getBoundingClientRect();
+      const grabX = event.clientX - box.left;
+      const grabY = event.clientY - box.top;
+      bubble.setPointerCapture(event.pointerId);
+
+      bubble.onpointermove = (move) => {
+        const stage = $('stage').getBoundingClientRect();
+        const sx = stage.width / canvas.width; // CSS px per canvas px
+        const sy = stage.height / canvas.height;
+        moveBubble(
+          (move.clientX - stage.left - grabX - INSET * sx) / ((canvas.width - BUBBLE - 2 * INSET) * sx),
+          (move.clientY - stage.top - grabY - INSET * sy) / ((canvas.height - BUBBLE - 2 * INSET) * sy),
+        );
+      };
+      bubble.onpointerup = bubble.onpointercancel = () => { bubble.onpointermove = null; };
+    });
+    bubble.addEventListener('keydown', (event) => {
+      const step = { ArrowLeft: [-0.05, 0], ArrowRight: [0.05, 0], ArrowUp: [0, -0.05], ArrowDown: [0, 0.05] }[event.key];
+      if (!step) return;
+      event.preventDefault();
+      moveBubble(bubblePos.fx + step[0], bubblePos.fy + step[1]);
+    });
+
+    for (const button of document.querySelectorAll('[data-mode]')) {
+      button.addEventListener('click', () => choose(button.dataset.mode));
+    }
+    for (const button of document.querySelectorAll('[data-scene]')) {
+      button.addEventListener('click', () => setScene(button.dataset.scene));
+    }
+    for (const button of document.querySelectorAll('[data-bg]')) {
+      button.addEventListener('click', () => {
+        session.bg = $('bgColor').value = button.dataset.bg;
+        press('[data-bg]', button);
+      });
+    }
+    $('bgColor').addEventListener('input', () => {
+      session.bg = $('bgColor').value;
+      press('[data-bg]', null);
+    });
+    for (const button of document.querySelectorAll('[data-frame]')) {
+      button.addEventListener('click', () => {
+        session.camFrame = button.dataset.frame ? { color: button.dataset.frame } : null;
+        press('[data-frame]', button);
+      });
+    }
+    $('titleText').addEventListener('input', () => { session.titleText = $('titleText').value; });
+    for (const button of document.querySelectorAll('[data-icon]')) {
+      button.addEventListener('click', () => fireIcon(button.dataset.icon));
+    }
+    document.addEventListener('keydown', (event) => {
+      if (event.target.matches('input, select, textarea')) return;
+      // shortcut: reads keydown, so IME input (CJK, some Indic layouts) can't be typed; move to a hidden <input> if needed.
+      if (typing) { // every key is text until Esc
+        if (event.key === 'Escape') endTyping();
+        else if (event.key === 'Enter') typing.text += '\n';
+        else if (event.key === 'Backspace') typing.text = typing.text.slice(0, -1);
+        else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey) typing.text += event.key;
+        else return;
+        event.preventDefault();
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && key === 'z') { undoMark(); event.preventDefault(); return; }
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (TOOL_KEYS[key]) { setAnnotateMode(TOOL_KEYS[key]); return; }
+      if (key === 'z') { setZoom(zoom.target === 1); return; }
+      if (key === 'c') { clearMarks(); return; }
+      if (key === 'escape') { // leaves the tool first, then the zoom
+        if (annotateMode) { setAnnotateMode(null); drawing = null; } else setZoom(false);
+        return;
+      }
+      const kind = ICON_KEYS[key];
+      if (!kind) return;
+      fireIcon(kind);
+    });
+    for (const button of document.querySelectorAll('[data-tool]')) {
+      button.addEventListener('click', () => setAnnotateMode(button.dataset.tool));
+    }
+    for (const button of document.querySelectorAll('[data-ink]')) {
+      button.addEventListener('click', () => { inkColor = button.dataset.ink; press('[data-ink]', button); });
+    }
+    $('zoomBtn').addEventListener('click', () => setZoom(zoom.target === 1));
+    $('undoBtn').addEventListener('click', undoMark);
+    $('clearBtn').addEventListener('click', clearMarks);
+    $('micSelect').addEventListener('change', swapDevices);
+    $('camSelect').addEventListener('change', swapDevices);
+    $('quality').addEventListener('change', sizeCanvas);
+    $('startBtn').addEventListener('click', countdownThenStart);
+    $('pauseBtn').addEventListener('click', togglePause);
+    $('stopBtn').addEventListener('click', stop);
+    $('cancelBtn').addEventListener('click', cancel);
+    $('retry').addEventListener('click', upload);
+  </script>
+</body>
+</html>

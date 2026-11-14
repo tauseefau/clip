@@ -1,0 +1,215 @@
+#!/usr/bin/env node
+// Clip MCP server: newline-delimited JSON-RPC 2.0 over stdio, a client of Clip's HTTP API.
+// stdout carries protocol lines only; anything else goes to stderr.
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { basename, extname } from 'node:path';
+import { createInterface } from 'node:readline';
+
+const BASE = (process.env.CLIP_URL || 'http://localhost:3001').replace(/\/+$/, '');
+const TOKEN = process.env.CLIP_TOKEN;
+const DUB_WAIT_MS = 45 * 60_000;
+
+// node:http rather than fetch: fetch gives up on response headers after 300 s, and a render can take longer.
+function api(method, path, { json, file, headers = {} } = {}) {
+  const url = new URL(BASE + path);
+  const send = url.protocol === 'https:' ? httpsRequest : httpRequest;
+  if (TOKEN) headers['x-clip-token'] = TOKEN;
+  if (json !== undefined) headers['content-type'] = 'application/json';
+  return new Promise((resolve, reject) => {
+    const req = send(url, { method, headers }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('error', reject);
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        let body = text;
+        try { body = JSON.parse(text); } catch { /* SRT and other text bodies */ }
+        if (res.statusCode >= 200 && res.statusCode < 300) return resolve(body);
+        reject(Object.assign(new Error(body?.error || `HTTP ${res.statusCode}`), { status: res.statusCode }));
+      });
+    });
+    req.on('error', (err) => reject(new Error(`Cannot reach Clip at ${BASE}: ${err.code || err.message}`)));
+    if (file) createReadStream(file).on('error', reject).pipe(req);
+    else req.end(json === undefined ? undefined : JSON.stringify(json));
+  });
+}
+
+const watchUrl = (id) => `${BASE}/watch/${id}`;
+const seconds = (ms) => Math.round((ms || 0) / 100) / 10;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function probeMs(path) {
+  return new Promise((resolve) => execFile('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', path],
+    (err, out) => resolve(err ? 0 : Math.round(parseFloat(out) * 1000) || 0)));
+}
+
+async function getRecording(id) {
+  const { waveform, edit, ...rest } = await api('GET', `/api/recordings/${encodeURIComponent(id)}`);
+  return { ...rest, ...(edit && { edit: JSON.parse(edit) }), watch_url: watchUrl(rest.id) };
+}
+
+// The API requires a trim; an agent asking only for cuts or a format means "the whole clip".
+async function fullTrim(id) {
+  const { duration_ms } = await api('GET', `/api/recordings/${encodeURIComponent(id)}`);
+  if (!duration_ms) throw new Error('Recording has no stored duration; pass trim {start, end} explicitly');
+  return { start: 0, end: duration_ms / 1000 };
+}
+
+const obj = (properties, required = []) => ({ type: 'object', properties, required });
+const id = { type: 'string', description: 'Recording id (uuid)' };
+const RENDER_FIELDS = ['trim', 'cuts', 'aspect', 'fit', 'background', 'overlays', 'captions', 'speed', 'normalize', 'watermark', 'music'];
+
+const TOOLS = {
+  list_recordings: {
+    description: 'List every recording in Clip, newest first.',
+    inputSchema: obj({}),
+    run: async () => (await api('GET', '/api/recordings')).map((r) =>
+      ({ id: r.id, title: r.title, duration_s: seconds(r.duration_ms), created_at: new Date(r.created_at).toISOString(), comments: r.comments })),
+  },
+  get_recording: {
+    description: 'Get one recording with its comments, watch URL and saved edit (waveform omitted).',
+    inputSchema: obj({ id }, ['id']),
+    run: async (a) => {
+      const r = await getRecording(a.id);
+      return { ...r, duration_s: seconds(r.duration_ms) };
+    },
+  },
+  upload_recording: {
+    description: 'Upload a local video file (webm/mp4/mov) as a new recording.',
+    inputSchema: obj({ path: { type: 'string', description: 'Absolute path to a local video file' }, title: { type: 'string' } }, ['path']),
+    run: async (a) => {
+      await stat(a.path);
+      const title = a.title || basename(a.path, extname(a.path));
+      const { id: newId } = await api('POST', '/api/recordings', {
+        file: a.path,
+        // Header values must be latin1 strings; the server decodes these bytes back to UTF-8.
+        headers: { 'x-title': Buffer.from(title, 'utf8').toString('latin1'), 'x-duration-ms': String(await probeMs(a.path)) },
+      });
+      return { id: newId, watch_url: watchUrl(newId) };
+    },
+  },
+  render_recording: {
+    description: 'Render an edited copy (trim, cuts, format, text, captions, speed, branding) as a new recording; the original stays. '
+      + 'Blocks until ffmpeg finishes, which may take minutes for long clips.',
+    inputSchema: obj({
+      id,
+      trim: { type: 'object', description: 'Seconds in the source; defaults to the whole clip', properties: { start: { type: 'number' }, end: { type: 'number' } } },
+      cuts: { type: 'array', description: 'Keep-ranges [[start,end],...] in seconds from trim start; omit to keep everything', items: { type: 'array', items: { type: 'number' } } },
+      aspect: { type: 'string', enum: ['16:9', '9:16', '1:1'] },
+      fit: { type: 'string', enum: ['pad', 'crop'] },
+      background: { type: 'string', description: '#rrggbb, shows in letterbox bars' },
+      overlays: { type: 'array', description: 'Text overlays', items: obj({
+        text: { type: 'string' }, x: { type: 'number', description: '0-1' }, y: { type: 'number', description: '0-1' },
+        size: { type: 'number', description: '8-200 px on a 1280-wide frame' }, color: { type: 'string', description: '#rrggbb' },
+        font: { type: 'string', enum: ['sans', 'sans-bold', 'serif'] }, bold: { type: 'boolean' },
+      }) },
+      captions: { type: 'array', description: 'Seconds into the edited clip (after trim and cuts)', items: obj({ start: { type: 'number' }, end: { type: 'number' }, text: { type: 'string' } }) },
+      speed: { type: 'number', description: '0.5-2' },
+      normalize: { type: 'boolean', description: 'Loudness-normalise audio (default true)' },
+      watermark: obj({ corner: { type: 'string', enum: ['tl', 'tr', 'bl', 'br'] }, size: { type: 'number' }, opacity: { type: 'number' }, margin: { type: 'number' } }),
+      music: obj({ id: { type: 'string' }, volume: { type: 'number' } }),
+    }, ['id']),
+    run: async (a) => {
+      const body = Object.fromEntries(RENDER_FIELDS.filter((k) => a[k] !== undefined).map((k) => [k, a[k]]));
+      body.trim ??= await fullTrim(a.id);
+      const { jobId } = await api('POST', `/api/recordings/${encodeURIComponent(a.id)}/render`, { json: body });
+      for (;;) { // the render is a background job since e91d7b5
+        const job = await api('GET', `/api/renders/${jobId}`);
+        if (job.state === 'error' || job.state === 'canceled') throw new Error(`Render failed at ${job.step}: ${job.error}`);
+        if (job.state === 'done') return { id: job.id, watch_url: watchUrl(job.id) };
+        await sleep(1000);
+      }
+    },
+  },
+  detect_silence: {
+    description: 'Propose keep-ranges that drop silent pauses; pass the cuts to render_recording.',
+    inputSchema: obj({ id, start: { type: 'number' }, end: { type: 'number' } }, ['id']),
+    run: async (a) => {
+      const q = new URLSearchParams(Object.entries({ start: a.start, end: a.end }).filter(([, v]) => v !== undefined));
+      const r = await api('GET', `/api/recordings/${encodeURIComponent(a.id)}/silence?${q}`);
+      return { cuts: r.cuts, removed_s: r.removed, total_s: r.total };
+    },
+  },
+  dub_recording: {
+    description: 'Re-voice a recording in another language as a new recording (es, hi, ur, ar, fr, de, pt, it). '
+      + 'Runs on a 4 GB GPU at roughly one minute of processing per minute of audio; wait:true polls for up to 45 minutes.',
+    inputSchema: obj({ id, target_lang: { type: 'string' }, source_lang: { type: 'string', description: 'Default en' }, wait: { type: 'boolean' } }, ['id', 'target_lang']),
+    run: async (a) => {
+      const { jobId } = await api('POST', `/api/recordings/${encodeURIComponent(a.id)}/dub`,
+        { json: { targetLang: a.target_lang, ...(a.source_lang && { sourceLang: a.source_lang }) } });
+      const deadline = Date.now() + DUB_WAIT_MS;
+      for (;;) {
+        const job = await api('GET', `/api/dubs/${jobId}`);
+        const done = job.state === 'done' || job.state === 'error';
+        if (!a.wait || done || Date.now() > deadline) {
+          if (job.state === 'error') throw new Error(`Dub failed at ${job.step}: ${job.error}`);
+          return { job_id: jobId, state: job.state, step: job.step, ...(job.recordingId && { id: job.recordingId, watch_url: watchUrl(job.recordingId) }) };
+        }
+        await sleep(3000);
+      }
+    },
+  },
+  add_comment: {
+    description: 'Add a comment to a recording.',
+    inputSchema: obj({ id, body: { type: 'string' }, author: { type: 'string', description: 'Default Guest' } }, ['id', 'body']),
+    run: (a) => api('POST', `/api/recordings/${encodeURIComponent(a.id)}/comments`, { json: { body: a.body, author: a.author } }),
+  },
+  delete_recording: {
+    description: 'Permanently delete a recording and its media.',
+    inputSchema: obj({ id }, ['id']),
+    run: (a) => api('DELETE', `/api/recordings/${encodeURIComponent(a.id)}`),
+  },
+  save_to_drive: {
+    description: 'Save a recording to Google Drive, if this Clip server has Drive configured.',
+    inputSchema: obj({ id, name: { type: 'string' } }, ['id']),
+    run: async (a) => {
+      try {
+        const r = await api('POST', `/api/recordings/${encodeURIComponent(a.id)}/drive`, { json: { name: a.name } });
+        return { file_id: r.fileId ?? r.file_id, web_view_link: r.webViewLink ?? r.web_view_link };
+      } catch (err) {
+        // The server's catch-all 404 says exactly "Not found"; anything else is a real answer from a Drive route.
+        if (err.status === 404 && err.message === 'Not found') throw new Error('Drive is not configured on this server');
+        throw err;
+      }
+    },
+  },
+};
+
+const write = (msg) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...msg }) + '\n');
+
+async function handle({ id: rpcId, method, params }) {
+  if (method === 'initialize') return { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'clip', version: '0.1.0' } };
+  if (method === 'ping') return {};
+  if (method === 'tools/list') return { tools: Object.entries(TOOLS).map(([name, { description, inputSchema }]) => ({ name, description, inputSchema })) };
+  if (method === 'tools/call') {
+    const tool = Object.hasOwn(TOOLS, params?.name) && TOOLS[params.name];
+    if (!tool) return { content: [{ type: 'text', text: `Unknown tool: ${params?.name}. Available: ${Object.keys(TOOLS).join(', ')}` }], isError: true };
+    try {
+      const result = await tool.run(params.arguments ?? {});
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: err.message }], isError: true };
+    }
+  }
+  throw Object.assign(new Error(`Method not found: ${method}`), { code: -32601 });
+}
+
+const pending = new Set();
+createInterface({ input: process.stdin }).on('line', (line) => {
+  if (!line.trim()) return;
+  let msg;
+  try { msg = JSON.parse(line); } catch { return write({ id: null, error: { code: -32700, message: 'Parse error' } }); }
+  const isNotification = msg.id === undefined;
+  const p = handle(msg).then(
+    (result) => isNotification || write({ id: msg.id, result }),
+    (err) => isNotification || write({ id: msg.id, error: { code: err.code ?? -32603, message: err.message } }),
+  ).finally(() => pending.delete(p));
+  pending.add(p);
+}).on('close', async () => {
+  await Promise.all(pending); // stdin closing (e.g. a piped test) must not drop in-flight answers
+  process.exit(0);
+});

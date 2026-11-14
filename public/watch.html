@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Watch · Clip</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="topbar">
+    <a class="brand" href="/">Clip</a>
+    <nav aria-label="Main">
+      <a href="/">Record</a>
+      <a href="/library">Library</a>
+      <a href="/stitch">Stitch</a>
+    </nav>
+  </div>
+
+  <main class="watch">
+    <div id="notice" class="notice error" role="alert" hidden></div>
+
+    <article id="content" hidden>
+      <video id="player" class="player" controls playsinline preload="metadata"></video>
+
+      <label class="sr-only" for="title">Title</label>
+      <input id="title" class="title-input" maxlength="200" autocomplete="off">
+      <p id="meta" class="watch-meta"></p>
+      <p id="lineage" class="watch-meta" hidden>from <a id="sourceLink"></a></p>
+
+      <div class="actions">
+        <button id="copy" class="btn primary" type="button">Copy link</button>
+        <a id="edit" class="btn">Edit</a>
+        <a id="download" class="btn">Download</a>
+        <input id="thumbText" class="thumb-text" maxlength="80" autocomplete="off" placeholder="Thumbnail headline (optional)" aria-label="Headline drawn on the thumbnail">
+        <button id="thumb" class="btn" type="button">Thumbnail</button>
+        <button id="thumbShorts" class="btn" type="button">Shorts thumbnail</button>
+        <button id="metadata" class="btn" type="button">Metadata</button>
+        <button id="package" class="btn" type="button">Upload package</button>
+        <a id="srt" class="btn" hidden>Download SRT</a>
+        <div class="menu-wrap">
+          <button id="more" class="btn menu-trigger" type="button" aria-label="More actions" aria-haspopup="menu" aria-expanded="false">⋯</button>
+          <div id="moreMenu" class="menu" role="menu" hidden>
+            <button id="delete" class="btn danger" type="button" role="menuitem">Delete clip</button>
+          </div>
+        </div>
+      </div>
+
+      <section class="comments" aria-labelledby="commentsHeading">
+        <h2 id="commentsHeading">Comments</h2>
+        <p id="noComments" class="muted">No comments yet.</p>
+        <ul id="comments" class="comment-list"></ul>
+        <form id="commentForm" class="comment-form">
+          <label class="sr-only" for="author">Your name</label>
+          <input id="author" maxlength="80" placeholder="Your name" autocomplete="name">
+          <label class="sr-only" for="body">Comment</label>
+          <textarea id="body" required placeholder="Leave a comment"></textarea>
+          <div class="comment-actions">
+            <button id="pinTime" class="btn pin" type="button" aria-pressed="true" title="Attach the current video time to this comment">
+              <span id="pinLabel">at 0:00</span>
+            </button>
+            <button id="send" class="btn primary" type="submit">Comment</button>
+          </div>
+        </form>
+      </section>
+    </article>
+  </main>
+
+  <script src="/auth.js"></script>
+  <script type="module">
+    const $ = (id) => document.getElementById(id);
+    const id = location.pathname.split('/').pop();
+    const api = `/api/recordings/${id}`;
+    const AUTHOR_KEY = 'clip.author';
+
+    const mm = (value) => String(Math.floor(value)).padStart(2, '0');
+    const formatTime = (ms) => `${mm(ms / 60000)}:${mm((ms / 1000) % 60)}`;
+
+    function showError(message) {
+      $('notice').textContent = message;
+      $('notice').hidden = false;
+    }
+
+    async function request(url, options) {
+      const response = await fetch(url, options);
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error ?? `Server returned ${response.status}`);
+      return result;
+    }
+
+    const sendJson = (method, value) => ({
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(value),
+    });
+
+    function addComment(comment) {
+      const item = document.createElement('li');
+      item.className = 'comment';
+      const head = document.createElement('div');
+      head.className = 'comment-head';
+      const author = document.createElement('strong');
+      author.textContent = comment.author;
+      const time = document.createElement('time');
+      time.dateTime = new Date(comment.created_at).toISOString();
+      time.textContent = new Date(comment.created_at).toLocaleString();
+      head.append(author);
+      if (Number.isFinite(comment.t)) {
+        const jump = document.createElement('button');
+        jump.type = 'button';
+        jump.className = 'comment-time';
+        jump.textContent = formatTime(comment.t * 1000);
+        jump.title = 'Jump to this moment';
+        jump.setAttribute('aria-label', `Jump to ${formatTime(comment.t * 1000)}`);
+        jump.addEventListener('click', () => {
+          $('player').currentTime = comment.t;
+          $('player').play();
+        });
+        head.append(jump);
+      }
+      head.append(time);
+      const body = document.createElement('p');
+      body.textContent = comment.body;
+      item.append(head, body);
+      $('comments').append(item);
+      $('noComments').hidden = true;
+    }
+
+    // MediaRecorder writes no duration into WebM. Seeking past the end makes the browser
+    // scan the file, after which the scrubber works normally.
+    function repairDuration(video) {
+      video.addEventListener('loadedmetadata', () => {
+        if (video.duration !== Infinity) return;
+        video.addEventListener('durationchange', () => { video.currentTime = 0; }, { once: true });
+        video.currentTime = Number.MAX_SAFE_INTEGER;
+      });
+    }
+
+    function render(recording) {
+      document.title = `${recording.title} · Clip`;
+      $('title').value = recording.title;
+      const date = new Date(recording.created_at).toLocaleString();
+      $('meta').textContent = `${date} · ${formatTime(recording.duration_ms)}`;
+      $('edit').href = `/edit/${id}`;
+      $('download').href = `/media/${id}.mp4`;
+      $('download').download = `${recording.title}.mp4`;
+      $('srt').hidden = !recording.captions;
+      $('srt').href = `${api}/captions.srt`;
+      $('lineage').hidden = !recording.source_title;
+      $('sourceLink').textContent = recording.source_title;
+      $('sourceLink').href = `/watch/${recording.source_id}`;
+      recording.comments.forEach(addComment);
+      repairDuration($('player'));
+      $('player').src = `/media/${id}.webm`;
+      $('content').hidden = false;
+    }
+
+    async function saveTitle() {
+      $('notice').hidden = true;
+      try {
+        const updated = await request(api, sendJson('PATCH', { title: $('title').value }));
+        $('title').value = updated.title;
+        document.title = `${updated.title} · Clip`;
+        $('download').download = `${updated.title}.mp4`;
+      } catch (err) {
+        showError(`Could not save the title: ${err.message}`);
+      }
+    }
+
+    async function copyLink() {
+      const url = location.href;
+      // navigator.clipboard only exists on https and localhost.
+      if (!navigator.clipboard) return void prompt('Copy this link:', url);
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        return void prompt('Copy this link:', url);
+      }
+      $('copy').textContent = 'Copied';
+      setTimeout(() => { $('copy').textContent = 'Copy link'; }, 1500);
+    }
+
+    async function remove() {
+      if (!confirm('Delete this recording and its comments? This cannot be undone.')) return;
+      try {
+        await request(api, { method: 'DELETE' });
+        location.href = '/library';
+      } catch (err) {
+        showError(`Could not delete the recording: ${err.message}`);
+      }
+    }
+
+    function closeMenu() {
+      $('moreMenu').hidden = true;
+      $('more').setAttribute('aria-expanded', 'false');
+    }
+
+    function toggleMenu() {
+      const open = $('moreMenu').hidden;
+      $('moreMenu').hidden = !open;
+      $('more').setAttribute('aria-expanded', String(open));
+      if (open) $('delete').focus();
+    }
+
+    async function submitComment(event) {
+      event.preventDefault();
+      $('notice').hidden = true;
+      const author = $('author').value.trim() || 'Guest';
+      const at = $('pinTime').getAttribute('aria-pressed') === 'true' ? $('player').currentTime : null;
+      $('send').disabled = true;
+      try {
+        addComment(await request(`${api}/comments`, sendJson('POST', { author, body: $('body').value, t: at })));
+        localStorage.setItem(AUTHOR_KEY, author);
+        $('body').value = '';
+      } catch (err) {
+        showError(`Could not post your comment: ${err.message}`);
+      } finally {
+        $('send').disabled = false;
+      }
+    }
+
+    $('author').value = localStorage.getItem(AUTHOR_KEY) ?? 'Guest';
+    $('title').addEventListener('change', saveTitle);
+    $('title').addEventListener('keydown', (event) => { if (event.key === 'Enter') $('title').blur(); });
+    $('copy').addEventListener('click', copyLink);
+    $('thumb').addEventListener('click', () => {
+      const at = $('player').currentTime.toFixed(2);
+      location.href = `/api/recordings/${id}/thumbnail.jpg?t=${at}&text=${encodeURIComponent($('thumbText').value)}`;
+    });
+    $('thumbShorts').addEventListener('click', () => {
+      const at = $('player').currentTime.toFixed(2);
+      location.href = `/api/recordings/${id}/thumbnail.jpg?t=${at}&aspect=9:16&text=${encodeURIComponent($('thumbText').value)}`;
+    });
+    $('metadata').addEventListener('click', () => {
+      location.href = `/api/recordings/${id}/metadata.txt`;
+    });
+    $('package').addEventListener('click', () => {
+      location.href = `/api/recordings/${id}/package.zip`;
+    });
+
+    function syncPin() {
+      $('pinLabel').textContent = `at ${formatTime($('player').currentTime * 1000)}`;
+    }
+    $('player').addEventListener('timeupdate', syncPin);
+    $('player').addEventListener('seeked', syncPin);
+    $('pinTime').addEventListener('click', () => {
+      const pressed = $('pinTime').getAttribute('aria-pressed') === 'true';
+      $('pinTime').setAttribute('aria-pressed', String(!pressed));
+    });
+    syncPin();
+    $('more').addEventListener('click', (event) => { event.stopPropagation(); toggleMenu(); });
+    $('delete').addEventListener('click', () => { closeMenu(); remove(); });
+    document.addEventListener('click', (event) => {
+      if (!$('moreMenu').hidden && !$('moreMenu').contains(event.target)) closeMenu();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !$('moreMenu').hidden) { closeMenu(); $('more').focus(); }
+    });
+    $('commentForm').addEventListener('submit', submitComment);
+
+    try {
+      render(await request(api));
+    } catch (err) {
+      showError(err.message);
+    }
+  </script>
+</body>
+</html>
