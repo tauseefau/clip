@@ -1014,10 +1014,25 @@ async function stitchRecordings(ids, title) {
   const id = randomUUID();
   const file = join(MEDIA, `${id}.webm`);
   const partial = `${file}.part`;
-  const listFile = join(TMP, `stitch-${id}.txt`);
-  await writeFile(listFile, recordings.map((r) => `file '${join(MEDIA, `${r.id}.webm`).replace(/'/g, "'\\''")}'`).join('\n'));
+  const sources = recordings.map((r) => join(MEDIA, `${r.id}.webm`));
+  // Takes can differ in size (a 9:16 render, another quality) or lack audio, which the concat demuxer cannot join,
+  // so each is fitted into the first one's frame and silent takes get a silent track.
+  const probes = await Promise.all(sources.map(async (source) => {
+    const out = await run(FFPROBE, ['-v', 'error', '-show_entries', 'stream=codec_type,width,height:format=duration', '-of', 'json', source]);
+    const { streams = [], format = {} } = JSON.parse(out || '{}');
+    return { video: streams.find((s) => s.codec_type === 'video'), audio: streams.some((s) => s.codec_type === 'audio'), duration: parseFloat(format.duration) };
+  }));
+  if (probes.some((p) => !p.video?.width)) fail(400, 'Every recording must have a video track');
+  const w = Math.floor(probes[0].video.width / 2) * 2;
+  const h = Math.floor(probes[0].video.height / 2) * 2;
+  const graph = probes.flatMap(({ audio, duration }, i) => [
+    `[${i}:v:0]scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[v${i}]`,
+    audio ? `[${i}:a:0]aresample=48000,aformat=channel_layouts=stereo[a${i}]`
+      : `anullsrc=r=48000:cl=stereo,atrim=duration=${Number.isFinite(duration) ? duration : 0.1}[a${i}]`,
+  ]);
+  graph.push(`${probes.map((_, i) => `[v${i}][a${i}]`).join('')}concat=n=${probes.length}:v=1:a=1[v][a]`);
   try {
-    const done = await run(FFMPEG, ['-y', '-f', 'concat', '-safe', '0', '-i', listFile,
+    const done = await run(FFMPEG, ['-y', ...sources.flatMap((s) => ['-i', s]), '-filter_complex', graph.join(';'), '-map', '[v]', '-map', '[a]',
       '-c:v', 'libvpx-vp9', '-crf', '20', '-b:v', '0', '-cpu-used', '4', '-row-mt', '1', '-pix_fmt', 'yuv420p',
       '-c:a', 'libopus', '-f', 'webm', partial], { cwd: TMP });
     if (done === null) fail(500, 'Stitch failed');
@@ -1029,10 +1044,8 @@ async function stitchRecordings(ids, title) {
     sql.insert.run(id, (title || 'Stitched clip').slice(0, 200), Date.now(), durationMs, size, 'video/webm', null, recordings[0].id, null);
     return { id, url: `/watch/${id}` };
   } catch (err) {
-    await Promise.all([rm(partial, { force: true }), rm(file, { force: true }), rm(listFile, { force: true })]);
+    await Promise.all([rm(partial, { force: true }), rm(file, { force: true })]);
     throw err;
-  } finally {
-    await rm(listFile, { force: true });
   }
 }
 

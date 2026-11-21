@@ -30,6 +30,7 @@
       <div class="actions">
         <button id="copy" class="btn primary" type="button">Copy link</button>
         <a id="edit" class="btn">Edit</a>
+        <a id="recordMore" class="btn" title="Record a new take and add it to the end of this video">Record more</a>
         <a id="download" class="btn">Download</a>
         <input id="thumbText" class="thumb-text" maxlength="80" autocomplete="off" placeholder="Thumbnail headline (optional)" aria-label="Headline drawn on the thumbnail">
         <button id="thumb" class="btn" type="button">Thumbnail</button>
@@ -141,6 +142,7 @@
       const date = new Date(recording.created_at).toLocaleString();
       $('meta').textContent = `${date} · ${formatTime(recording.duration_ms)}`;
       $('edit').href = `/edit/${id}`;
+      $('recordMore').href = `/?continue=${id}`;
       $('download').href = `/media/${id}.mp4`;
       $('download').download = `${recording.title}.mp4`;
       $('srt').hidden = !recording.captions;

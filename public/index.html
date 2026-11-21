@@ -20,6 +20,9 @@
     <header id="intro">
       <h1>Record a clip</h1>
       <p class="muted">Pick what to capture. You get a link to share when you stop.</p>
+      <p id="continueNote" class="notice" hidden>Recording more for <a id="continueLink"></a>.
+        When you stop, this take is added to the end as a new clip; the original stays as it is.
+        <a href="/">Start a fresh clip instead</a></p>
     </header>
 
     <div id="notice" class="notice" role="status" hidden>
@@ -253,6 +256,43 @@
     const bubblePos = { fx: 1, fy: 1 }; // 0..1 across the area the bubble can occupy
     let session = null;
     let pendingUpload = null;
+
+    // ?continue=<id> (Watch page "Record more"): the new take is joined onto the end of that recording.
+    let continueFrom = null;
+    const continueId = new URLSearchParams(location.search).get('continue');
+    if (continueId) {
+      fetch(`/api/recordings/${encodeURIComponent(continueId)}`)
+        .then((response) => (response.ok ? response.json() : null))
+        .then((recording) => {
+          if (!recording) return;
+          continueFrom = recording;
+          $('continueLink').textContent = recording.title;
+          $('continueLink').href = `/watch/${recording.id}`;
+          $('continueNote').hidden = false;
+        })
+        .catch(() => {}); // offline or gone: record as a fresh clip
+    }
+
+    async function joinOnto(takeId) {
+      showNotice(`Adding this take to the end of “${continueFrom.title}”…`);
+      try {
+        const response = await fetch('/api/stitch', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ids: [continueFrom.id, takeId], title: continueFrom.title }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error ?? `Server returned ${response.status}`);
+        location.href = result.url;
+      } catch (err) {
+        // The take is already saved on its own, so nothing is lost: point at it.
+        showNotice(`Your new take is saved, but adding it to the end failed: ${err.message}. `, true);
+        const link = document.createElement('a');
+        link.href = `/watch/${takeId}`;
+        link.textContent = 'Open the new take';
+        $('noticeText').append(link);
+      }
+    }
 
     function showNotice(message, isError = false) {
       $('notice').hidden = false;
@@ -922,6 +962,7 @@
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error ?? `Server returned ${response.status}`);
+        if (continueFrom) return void joinOnto(result.id);
         location.href = '/watch/' + result.id;
       } catch (err) {
         // The blob only exists in this tab, so a failed upload must never lose it.
