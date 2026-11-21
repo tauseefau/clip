@@ -507,6 +507,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .timeline-viewport .timeline { margin-top: 0; }
 .cut-shade { position: absolute; inset: 0; pointer-events: none; }
 .playhead { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; margin-left: -1px; background: var(--accent); pointer-events: none; }
+.cut-mark { background: rgb(255 92 92); }
 .cut-rows { display: grid; gap: 4px; max-height: 240px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
 .cut-rows:empty { display: none; }
 .cut-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 4px 2px 8px; border-radius: 8px; font-variant-numeric: tabular-nums; }

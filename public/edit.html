@@ -32,6 +32,7 @@
       <div id="timelineViewport" class="timeline-viewport">
         <div id="timeline" class="timeline" aria-hidden="true">
           <div id="cutShade" class="cut-shade"></div>
+          <div id="cutMark" class="playhead cut-mark" hidden></div>
           <div id="playhead" class="playhead"></div>
         </div>
       </div>
@@ -54,13 +55,16 @@
 
       <section class="edit-panel" aria-labelledby="cutsHeading">
         <h2 id="cutsHeading">Cuts</h2>
-        <p class="muted">Kept ranges, in recording time. Split at the playhead, then remove the piece you don't want.
-          Keys: Space play/pause, ←/→ frame, I/O set in/out, Ctrl+Z undo, Shift+Ctrl+Z redo.</p>
+        <p class="muted">To cut a part out: play to where it starts and press <b>Mark cut start</b> (or X),
+          move to where it ends and press <b>Cut it out</b> (or X again). Ctrl+Z undoes.
+          Keys: Space play/pause, ←/→ frame, I/O set trim in/out.</p>
         <div class="button-row">
-          <button id="split" class="btn" type="button">Split at playhead</button>
-          <button id="removeRange" class="btn" type="button">Remove selected range</button>
+          <button id="markCut" class="btn" type="button">Mark cut start</button>
+          <button id="cutOut" class="btn primary" type="button" disabled>Cut it out</button>
+          <button id="clearMark" class="btn" type="button" hidden>Cancel</button>
           <button id="removeSilence" class="btn" type="button">Remove silence</button>
         </div>
+        <output id="markReadout" class="muted" aria-live="polite"></output>
         <div class="button-row">
           <button id="prevFrame" class="btn" type="button" aria-label="Back one frame">◀ Frame</button>
           <button id="nextFrame" class="btn" type="button" aria-label="Forward one frame">Frame ▶</button>
@@ -295,6 +299,7 @@
     // Infinity: runs to the end of whatever the trim is. formState() converts to the API's trimmed-clip seconds.
     let keeps = [[0, Infinity]];
     const MAX_CUTS = 200;
+    let cutMarkAt = null; // recording seconds where the part to cut out starts, or null
     const HISTORY_GAP_MS = 400;
     const undoStack = [];
     const redoStack = [];
@@ -394,7 +399,6 @@
         row.append(label, remove);
         return row;
       }).filter(Boolean));
-      $('split').disabled = keeps.length >= MAX_CUTS;
       // The strip spans the whole recording: dim outside the trim, shade what the cuts remove.
       const duration = player.duration;
       if (!Number.isFinite(duration) || duration <= 0) return;
@@ -446,24 +450,57 @@
       }
       const current = String(keepAt(player.currentTime));
       for (const row of $('cutRows').children) row.classList.toggle('current', row.dataset.index === current);
+      const marked = cutMarkAt !== null;
+      $('cutMark').hidden = !marked || !(duration > 0);
+      if (marked && duration > 0) $('cutMark').style.left = `${cutMarkAt / duration * 100}%`;
+      $('cutOut').disabled = !marked;
+      $('clearMark').hidden = !marked;
+      $('markCut').textContent = marked ? 'Move cut start here' : 'Mark cut start';
+      const [a, b] = [Math.min(cutMarkAt, player.currentTime), Math.max(cutMarkAt, player.currentTime)];
+      $('markReadout').textContent = marked ? `Will cut ${formatTimecode(a)} → ${formatTimecode(b)} (${(b - a).toFixed(1)}s)` : '';
     }
 
-    // shortcut: splits at the raw playhead time. Snapping to the quietest sample within ±300 ms needs a peak array,
-    // and the waveform is only a PNG; decode it to peaks (canvas getImageData per column) if mid-syllable splits click.
-    function split() {
-      const t = Math.round(player.currentTime * 1000) / 1000;
-      const index = keepAt(t);
-      if (index < 0 || keeps.length >= MAX_CUTS) return;
-      const [a, b] = keeps[index];
-      if (t - a < 0.1 || b - t < 0.1) return; // the server refuses ranges under 0.1 s
-      keeps.splice(index, 1, [a, t], [t, b]);
+    // Applies new keeps unless they would leave nothing to render (the server refuses an empty clip).
+    function setKeeps(next) {
+      const previous = keeps;
+      keeps = next;
+      if (keptLength() < 0.1) {
+        keeps = previous;
+        showError('That would cut the whole clip. Keep at least part of it, or use Trim to shorten it.');
+        return false;
+      }
+      $('notice').hidden = true;
       showCuts();
+      return true;
+    }
+
+    // One-step slicer: mark where the unwanted part starts, move the playhead, cut out everything between.
+    // shortcut: cuts at the raw playhead time; snap to the quietest sample if mid-syllable cuts click.
+    const playheadAt = () => Math.round(player.currentTime * 1000) / 1000;
+
+    function markCut() {
+      cutMarkAt = playheadAt();
+      showPlayhead();
+    }
+
+    function clearMark() {
+      cutMarkAt = null;
+      showPlayhead();
+    }
+
+    function cutOut() {
+      if (cutMarkAt === null) return;
+      const from = Math.min(cutMarkAt, playheadAt());
+      const to = Math.max(cutMarkAt, playheadAt());
+      if (to - from < 0.1) return showError('Move the playhead away from the red mark first: the part to cut is under 0.1 s.');
+      // Slivers under 0.1 s are dropped, as the server refuses them.
+      const next = keeps.flatMap(([a, b]) => [[a, Math.min(b, from)], [Math.max(a, to), b]]).filter(([a, b]) => b - a >= 0.1);
+      if (next.length > MAX_CUTS) return showError(`At most ${MAX_CUTS} kept pieces.`);
+      if (setKeeps(next)) clearMark();
     }
 
     function removeKeep(index) {
-      if (index < 0) return;
-      keeps.splice(index, 1);
-      showCuts();
+      if (index >= 0) setKeeps(keeps.filter((_, i) => i !== index));
     }
 
     async function removeSilence() {
@@ -1070,16 +1107,19 @@
       $('cancelRender').hidden = false;
       setRendering('Starting…');
       const state = formState();
+      // A split nobody removed is not a cut: rejoin it, or the join's fades dip the audio.
+      const cuts = state.cuts.reduce((out, [a, b]) => {
+        if (out.length && a - out.at(-1)[1] < 1e-6) out.at(-1)[1] = b;
+        else out.push([a, b]);
+        return out;
+      }, []);
+      // Cutting shortens the clip, so captions written before a cut can run past the end: clip them instead of failing.
+      const kept = Math.floor(cuts.reduce((n, [a, b]) => n + (b - a), 0) * 1000) / 1000;
       const edit = {
         ...state,
-        // A split nobody removed is not a cut: rejoin it, or the join's fades dip the audio.
-        cuts: state.cuts.reduce((out, [a, b]) => {
-          if (out.length && a - out.at(-1)[1] < 1e-6) out.at(-1)[1] = b;
-          else out.push([a, b]);
-          return out;
-        }, []),
+        cuts,
         overlays: state.overlays.filter((o) => o.text.trim()),
-        captions: state.captions.filter((c) => c.text.trim()),
+        captions: state.captions.filter((c) => c.text.trim() && c.start < kept - 0.01).map((c) => ({ ...c, end: Math.min(c.end, kept) })),
         zooms: state.zooms.filter((z) => z.end > z.start),
         watermark: hasWatermark ? state.watermark : null,
         music: state.music.id ? state.music : null,
@@ -1127,6 +1167,11 @@
       } else if (key === 'o') {
         $('end').value = player.currentTime;
         moveEnd();
+      } else if (key === 'x') {
+        if (cutMarkAt === null) markCut();
+        else cutOut();
+      } else if (key === 'escape' && cutMarkAt !== null) {
+        clearMark();
       } else if (key === 'delete' || key === 'backspace') {
         event.preventDefault();
         removeSelected();
@@ -1189,8 +1234,9 @@
     $('nextFrame').addEventListener('click', () => stepFrame(1));
     $('zoomIn').addEventListener('click', () => setZoom(zoom * 2));
     $('zoomOut').addEventListener('click', () => setZoom(zoom / 2));
-    $('split').addEventListener('click', split);
-    $('removeRange').addEventListener('click', () => removeKeep(keepAt(player.currentTime)));
+    $('markCut').addEventListener('click', markCut);
+    $('cutOut').addEventListener('click', cutOut);
+    $('clearMark').addEventListener('click', clearMark);
     $('removeSilence').addEventListener('click', guarded(removeSilence));
     $('cutRows').addEventListener('click', ({ target }) => {
       if (target.classList.contains('cut-remove')) removeKeep(Number(target.closest('.cut-row').dataset.index));
