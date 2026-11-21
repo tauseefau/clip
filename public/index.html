@@ -1038,6 +1038,8 @@
     $('clearBtn').addEventListener('click', clearMarks);
     $('micSelect').addEventListener('change', swapDevices);
     $('camSelect').addEventListener('change', swapDevices);
+    // Bluetooth headsets often connect after setup; refresh the pickers when the OS device list changes.
+    navigator.mediaDevices?.addEventListener('devicechange', () => { if (session) listDevices(); });
     $('quality').addEventListener('change', sizeCanvas);
     $('startBtn').addEventListener('click', countdownThenStart);
     $('pauseBtn').addEventListener('click', togglePause);
