@@ -49,6 +49,13 @@
           <input id="end" type="range" min="0" max="0" step="0.1" value="0">
           <input id="endTime" class="timecode" inputmode="decimal" autocomplete="off" aria-label="End time, mm:ss.s">
         </div>
+        <div class="button-row">
+          <button id="startHere" class="btn" type="button">Start here</button>
+          <button id="endHere" class="btn" type="button">End here</button>
+          <button id="playTrim" class="btn" type="button">Play from start</button>
+        </div>
+        <p class="muted">Play or scrub to where the video should begin and press <b>Start here</b> (or I), then to where it
+          should finish and press <b>End here</b> (or O). Press <b>Render</b> at the bottom of the page to save the trimmed video.</p>
         <output id="readout" class="muted" for="start end"></output>
         <p id="limit" class="notice error" role="alert" hidden></p>
       </section>
@@ -1185,6 +1192,14 @@
     $('customColor').addEventListener('input', (event) => setBackground(event.target.value));
     $('start').addEventListener('input', moveStart);
     $('end').addEventListener('input', moveEnd);
+    $('startHere').addEventListener('click', () => { $('start').value = player.currentTime; moveStart(); });
+    $('endHere').addEventListener('click', () => { $('end').value = player.currentTime; moveEnd(); });
+    $('playTrim').addEventListener('click', () => { player.currentTime = Number($('start').value); player.play().catch(() => {}); });
+    // Preview the trim: playing into the end point stops there. Only right at the edge, so playing on from past it still works.
+    player.addEventListener('timeupdate', () => {
+      const end = Number($('end').value);
+      if (!player.paused && player.currentTime >= end && player.currentTime < end + 0.5 && end < Number($('end').max)) player.pause();
+    });
     $('startTime').addEventListener('change', () => typeTrim('start', moveStart));
     $('endTime').addEventListener('change', () => typeTrim('end', moveEnd));
     $('addText').addEventListener('click', addText);

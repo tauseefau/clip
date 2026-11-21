@@ -56,6 +56,21 @@ assert.deepEqual(await rows(), ['00:00.0 → 00:05.0', '00:10.0 → end']);
 await page.click('#clearMark');
 assert.equal(await page.isHidden('#cutMark'), true);
 
+// Trim with the playhead buttons: keep 1-18 s, so with the 5-10 cut 12 s remain.
+await seek(1);
+await page.click('#startHere');
+await seek(18);
+await page.click('#endHere');
+assert.equal(await page.inputValue('#startTime'), '00:01.0');
+assert.equal(await page.inputValue('#endTime'), '00:18.0');
+assert.match(await page.textContent('#keptReadout'), /00:12.0 of 00:17.0/);
+// Playing into the end point pauses there.
+await seek(17.3);
+await page.evaluate(() => { const v = document.getElementById('player'); v.muted = true; return v.play(); }); // muted: headless autoplay policy
+await page.waitForFunction(() => document.getElementById('player').paused, null, { timeout: 5000 });
+const stoppedAt = await page.evaluate(() => document.getElementById('player').currentTime);
+assert.ok(stoppedAt >= 18 && stoppedAt < 18.5, `paused at ${stoppedAt}`);
+
 // A caption written for the uncut 20 s clip (ends at 19 s, past the 15 s kept) must not block the render.
 await page.click('#addCaption');
 await page.fill('#captionRows .cap-start', '13');
